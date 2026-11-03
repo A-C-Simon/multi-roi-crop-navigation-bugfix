@@ -1,0 +1,292 @@
+{
+  "results": {
+    "F01": {
+      "reproduced": true,
+      "observed": [
+        {
+          "lookahead": false,
+          "theta_deg": 7.822372889475054,
+          "w_raw": -0.13788814490540596
+        },
+        {
+          "lookahead": true,
+          "theta_deg": -7.955586363642355,
+          "w_raw": 0.16058345808969676
+        }
+      ]
+    },
+    "F02": {
+      "reproduced": true,
+      "observed": {
+        "without_map_px": 1.0000000000000568,
+        "with_map_px": -11.0,
+        "crop_offset": [
+          12,
+          9
+        ]
+      }
+    },
+    "F03": {
+      "reproduced": true,
+      "observed": {
+        "frame_index": 1,
+        "error": "list index out of range"
+      }
+    },
+    "F04": {
+      "reproduced": true,
+      "observed": {
+        "two_sided": 0,
+        "accepted_points": 10,
+        "has_line": true,
+        "v_mps": 0.10262088900465821,
+        "status": "pending",
+        "confidence": 0.11473535458780187
+      }
+    },
+    "F05": {
+      "reproduced": true,
+      "observed": {
+        "info_has_line_present": false,
+        "filtered_has_line": true,
+        "two_sided": 10
+      },
+      "scope": "Reproduces the missing interface field; no Gazebo run performed"
+    },
+    "F06": {
+      "reproduced": true,
+      "observed": [
+        {
+          "elapsed_host_seconds": 0.001,
+          "w_radps": -0.0612
+        },
+        {
+          "elapsed_host_seconds": 0.4,
+          "w_radps": -0.148375
+        }
+      ],
+      "scope": "Deterministic clock injection into the existing wall-clock controller path"
+    },
+    "F07": {
+      "reproduced": true,
+      "observed": {
+        "filter_runs": [
+          {
+            "configured_strips": 10,
+            "two_sided": 6,
+            "filtered_bottom_x": 320.0,
+            "status": "pending",
+            "pending_count": 200
+          },
+          {
+            "configured_strips": 5,
+            "two_sided": 5,
+            "filtered_bottom_x": 320.0,
+            "status": "pending",
+            "pending_count": 200
+          }
+        ],
+        "detector_two_sided_by_ignore_initial": {
+          "0": 10,
+          "3": 7,
+          "4": 6
+        }
+      },
+      "scope": "Filter hold and detector evidence limit reproduced; no closed-loop trajectory measured"
+    },
+    "F08": {
+      "reproduced": true,
+      "observed": {
+        "failed_callbacks": 3,
+        "new_command_publications": 0,
+        "stop_calls": 0,
+        "last_command_v_mps": 0.2,
+        "max_seconds": 1.0,
+        "last_sim_seconds": 102,
+        "odom_x": 100.0,
+        "lane_end_x": 10.0
+      },
+      "scope": "Executes the unchanged callback body with stub ROS objects and injected pipeline failures. No Gazebo plugin or live ROS test."
+    },
+    "F09": {
+      "reproduced": true,
+      "observed": {
+        "interleaved_statuses": [
+          "pending",
+          "pending",
+          "pending",
+          "pending",
+          "pending",
+          "pending",
+          "pending_accepted"
+        ],
+        "after_100_missing_frames_then_one_observation": "pending_accepted",
+        "filtered_bottom_x_after_gap": 355.0
+      }
+    },
+    "F10": {
+      "reproduced": true,
+      "observed": {
+        "maximum_difference_from_all_points_spline": 0.0,
+        "input_points": 8,
+        "kept_points": 6
+      },
+      "scope": "Reports whether the proposed sample actually removed any point as well as spline agreement"
+    },
+    "A01": {
+      "reproduced": true,
+      "observed": {
+        "expected_x": 300,
+        "point_order_results": [
+          {
+            "line": [
+              -1000000.0,
+              -300000000.0
+            ],
+            "x_at_y_250": -300.00025
+          },
+          {
+            "line": [
+              1000000.0,
+              -300000000.0
+            ],
+            "x_at_y_250": 300.00025
+          }
+        ],
+        "healthy_straight_corridor": {
+          "two_sided": 10,
+          "lateral_error_px": -617.000461,
+          "v_mps": 0.2,
+          "w_radps": 0.6
+        }
+      }
+    },
+    "A02": {
+      "reproduced": true,
+      "observed": [
+        {
+          "dt_seconds": 0.05,
+          "command_after_100_updates": -0.3125,
+          "raw_command": -0.3125
+        },
+        {
+          "dt_seconds": 0.01,
+          "command_after_100_updates": 0.0,
+          "raw_command": -0.3125
+        },
+        {
+          "dt_seconds": 0.005,
+          "command_after_100_updates": 0.0,
+          "raw_command": -0.3125
+        }
+      ]
+    },
+    "P06": {
+      "reproduced": true,
+      "observed": {
+        "cli_lambdax": 10.0,
+        "library_lambdax": 2.0,
+        "cli_wmax": 0.5,
+        "library_wmax": 0.6
+      },
+      "scope": "Configuration divergence; stability consequences not measured"
+    },
+    "P07": {
+      "reproduced": true,
+      "observed": {
+        "true_center": 200.0,
+        "frames": [
+          {
+            "status": "map_accept",
+            "predicted_center": 246.6666666666667,
+            "confidence": 0.23711111111111094
+          },
+          {
+            "status": "map_reject",
+            "predicted_center": 246.6666666666667,
+            "confidence": 0.2963888888888887
+          },
+          {
+            "status": "map_reject",
+            "predicted_center": 246.6666666666667,
+            "confidence": 0.2963888888888887
+          },
+          {
+            "status": "map_reject",
+            "predicted_center": 246.6666666666667,
+            "confidence": 0.2963888888888887
+          },
+          {
+            "status": "map_reject",
+            "predicted_center": 246.6666666666667,
+            "confidence": 0.2963888888888887
+          },
+          {
+            "status": "map_reject",
+            "predicted_center": 246.6666666666667,
+            "confidence": 0.2963888888888887
+          },
+          {
+            "status": "map_reject",
+            "predicted_center": 246.6666666666667,
+            "confidence": 0.2963888888888887
+          },
+          {
+            "status": "map_reject",
+            "predicted_center": 246.6666666666667,
+            "confidence": 0.2963888888888887
+          },
+          {
+            "status": "map_reject",
+            "predicted_center": 246.6666666666667,
+            "confidence": 0.2963888888888887
+          },
+          {
+            "status": "map_reject",
+            "predicted_center": 246.6666666666667,
+            "confidence": 0.2963888888888887
+          }
+        ]
+      }
+    },
+    "P08": {
+      "reproduced": true,
+      "observed": {
+        "missing_bottom": {
+          "map_status": "map_hold",
+          "bottom_missing": false,
+          "bottom_consistent": false,
+          "proxy_strip_status": "map_accept"
+        },
+        "ignored_bottom_support": {
+          "effective_bottom_index": 3,
+          "effective_bottom_center": 260.0,
+          "ignored_strip_0_center": 200.0,
+          "support_new": 0,
+          "upper_strips_matching_effective_bottom": 7,
+          "map_status": "map_pending"
+        }
+      }
+    },
+    "P09": {
+      "reproduced": true,
+      "observed": {
+        "detector_step_px": 34.0,
+        "map_step_px": 36.0,
+        "crop_offset": [
+          12,
+          9
+        ],
+        "detector_coverage": 0.75
+      },
+      "scope": "Grid mismatch measured; prediction and overlay impact depends on scene"
+    },
+    "P10": {
+      "reproduced": true,
+      "observed": {
+        "error": "local variable 'nav_line' referenced before assignment"
+      }
+    }
+  },
+  "baseline_commit": "d5c68594e8e633b4569a4a59f8c60f33ac785cf0"
+}

@@ -1,0 +1,18 @@
+{
+  "baseline_commit": "d5c68594e8e633b4569a4a59f8c60f33ac785cf0",
+  "checked_files": 46,
+  "mismatches": [],
+  "python": "3.10.12",
+  "packages": {
+    "numpy": "1.26.4",
+    "opencv-python": "4.11.0.86",
+    "scipy": "1.15.3",
+    "pytest": "6.2.5"
+  },
+  "baseline_tests": {
+    "command": "env -u PYTHONPATH -u PYTHONHOME python3 -m pytest -q",
+    "passed": 8,
+    "reported_duration_seconds": 2.37
+  },
+  "execution_scope": "Local CPU detector, map, filter, and controller reproductions. No ROS, Gazebo, or physical robot execution in this review."
+}

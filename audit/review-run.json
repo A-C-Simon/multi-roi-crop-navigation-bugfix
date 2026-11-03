@@ -1,0 +1,76 @@
+{
+  "date": "2026-11-03",
+  "baseline_commit": "d5c68594e8e633b4569a4a59f8c60f33ac785cf0",
+  "requested_model": "claude-opus-5-5",
+  "requested_effort": "high",
+  "reviewer_execution": "Read-only Claude CLI; no shell, writes, external MCP tools, or delegated agents enabled.",
+  "reproduction_execution": "Coordinating reviewer ran local CPU diagnostics against unchanged runtime files.",
+  "runs": [
+    {
+      "stage": "independent",
+      "completed": true,
+      "model": [
+        "claude-opus-5-5"
+      ],
+      "canonical_models": [
+        "claude-opus-5-5"
+      ],
+      "effort": "high",
+      "tools": [
+        "Read",
+        "Glob",
+        "Grep"
+      ],
+      "permission_denials": 0
+    },
+    {
+      "stage": "reconciliation",
+      "completed": true,
+      "model": [
+        "claude-opus-5-5"
+      ],
+      "canonical_models": [
+        "claude-opus-5-5"
+      ],
+      "effort": "high",
+      "tools": [
+        "Read",
+        "Glob",
+        "Grep"
+      ],
+      "permission_denials": 0
+    },
+    {
+      "stage": "prior_comparison",
+      "completed": true,
+      "model": [
+        "claude-opus-5-5"
+      ],
+      "canonical_models": [
+        "claude-opus-5-5"
+      ],
+      "effort": "high",
+      "tools": [
+        "Read",
+        "Glob",
+        "Grep"
+      ],
+      "permission_denials": 0
+    }
+  ],
+  "review_sequence": [
+    "Independent source review without prior audit",
+    "Local reproductions and evidence reconciliation",
+    "User-supplied prior audit comparison"
+  ],
+  "diagnostic_cases": 17,
+  "reproduced_cases": 17,
+  "implementation_files_checked": 46,
+  "runtime_changes": false,
+  "report_sha256": {
+    "reports/evidence-reconciliation.md": "3643d88dc47b7423c16963ec0579079fc1940df015b4f3f45265a2050afffd9e",
+    "reports/findings-review.md": "8b3b531c2bd8b1eeca6ecc87b17f8e12b23b6a4ce9e3a095619a55c13fc60f95",
+    "reports/independent-audit.md": "907b848a460a1d89def36da9ec8d166ef78d19c4c8654c2fd7725969e3c4df85",
+    "reports/prior-audit-comparison.md": "5ddf9a4584bd0610b78e1d8b61aa9505d9a4ee04f3ccff652526ee32493b6da3"
+  }
+}

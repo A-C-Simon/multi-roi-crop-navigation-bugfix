@@ -7,8 +7,17 @@ reproductions, and subsequent corrections belong here.
 
 ## Current stage
 
-Independent source review and findings assessment. No runtime corrections
-have been applied. Findings will be reviewed before implementation begins.
+Independent review and targeted reproduction are complete. The findings are
+ready for discussion. No runtime corrections have been applied.
+
+The reconciled review records 6 High, 6 Medium and 14 Low defects, with two
+policy items and one maintainability item tracked separately. Seventeen local
+diagnostic cases reproduced the recorded baseline observations.
+
+Start with the [consolidated findings](audit/reports/findings-review.md) or the
+[comparison with the prior audit](audit/reports/prior-audit-comparison.md).
+The [reproduction instructions](audit/reproductions/README.md) explain the
+executed checks and their scope.
 
 ## Baseline
 
