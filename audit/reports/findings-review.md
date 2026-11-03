@@ -1,5 +1,8 @@
 # Consolidated findings for review
 
+This is the pre-clarification assessment. The [design review](design-intent-review.md)
+supersedes its general interpretation of holds, gap handling and recovery.
+
 Review date: 3 November 2026  
 Source revision: `d5c68594e8e633b4569a4a59f8c60f33ac785cf0`  
 Status: findings discussion; implementation unchanged

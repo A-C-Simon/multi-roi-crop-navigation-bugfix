@@ -7,17 +7,19 @@ reproductions, and subsequent corrections belong here.
 
 ## Current stage
 
-Independent review and targeted reproduction are complete. The findings are
-ready for discussion. No runtime corrections have been applied.
+Review against the corridor-tracking design. The smoother, strict holds and
+lookahead memory deliberately protect the tracked furrow from noisy detections.
+The latest review distinguishes those protections from arithmetic errors,
+evidence-handling errors and unresolved recovery requirements.
 
-The reconciled review records 6 High, 6 Medium and 14 Low defects, with two
-policy items and one maintainability item tracked separately. Seventeen local
-diagnostic cases reproduced the recorded baseline observations.
+Start with the [design review](audit/reports/design-intent-review.md) and the
+[Opus reassessment](audit/reports/design-intent-reassessment.md). Six additional
+local sequences demonstrate both useful noise rejection and remaining defects.
+No runtime corrections have been applied.
 
-Start with the [consolidated findings](audit/reports/findings-review.md) or the
-[comparison with the prior audit](audit/reports/prior-audit-comparison.md).
-The [reproduction instructions](audit/reproductions/README.md) explain the
-executed checks and their scope.
+Earlier severity counts and the [prior-audit comparison](audit/reports/prior-audit-comparison.md)
+remain available as review history. The [reproduction instructions](audit/reproductions/README.md)
+cover the original diagnostics and the new design sequences.
 
 ## Baseline
 

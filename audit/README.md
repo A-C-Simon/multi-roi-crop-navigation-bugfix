@@ -1,7 +1,9 @@
 # Audit record
 
-The independent audit, local reproductions and prior-report comparison are
-complete. Findings are ready for discussion. No runtime code has changed.
+The latest stage reassesses findings against the owner's corridor-tracking and
+anti-jitter design. Read the [current design review](reports/design-intent-review.md)
+and [Opus reassessment](reports/design-intent-reassessment.md) first. Earlier
+classifications remain historical. No runtime code has changed.
 
 ## Findings and evidence
 
@@ -17,10 +19,11 @@ complete. Findings are ready for discussion. No runtime code has changed.
 | [Execution record](review-run.json) | Requested and returned model, effort, tools and report hashes |
 | [Baseline](BASELINE.md) | Official revision and repository separation |
 
-Final comparison: 6 High, 6 Medium and 14 Low defects; two policy items and one
-maintainability item are separate. These counts distinguish root causes from
-multiple symptoms. Report stages retain their initial assessments so changes
-in evidence and severity remain traceable.
+The earlier comparison reported 6 High, 6 Medium and 14 Low defects, with
+policy and maintainability items separate. The subsequent design review
+rewords holds, gap handling and recovery, and retains those counts as historical.
+It does not assign a new aggregate count to intentional behaviour and open
+requirements.
 
 ## Review sequence
 
@@ -37,3 +40,7 @@ states its scope. No ROS/Gazebo or physical robot run was performed in this revi
 All 46 recorded implementation and configuration hashes match the official
 baseline. Original source-snapshot metadata and historical results remain
 under `docs` as inherited project material.
+
+Six additional [design sequences](evidence/design-intent-results.json) examine
+noise rejection, gradual tracking, memory protection, sustained steering and
+full temporary occlusion. See the current design review for their scope.

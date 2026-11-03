@@ -41,3 +41,16 @@ without a complete ROS or Gazebo run. No physical robot was used.
 See [results](../evidence/runtime-results.json),
 [environment](../evidence/environment.json), and the
 [consolidated review](../reports/findings-review.md).
+
+## Design-intent sequences
+
+```bash
+env -u PYTHONPATH -u PYTHONHOME python3 audit/reproductions/design_intent_checks.py \
+  --repo . --output /tmp/multiroi-design-intent-results.json
+```
+
+These six sequences record useful anti-jitter behaviour as well as defects.
+The script prints observations; successful execution does not mean every
+observation is desired behaviour. See the
+[design review](../reports/design-intent-review.md) and
+[recorded results](../evidence/design-intent-results.json).
