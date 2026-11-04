@@ -46,4 +46,5 @@ py-modules = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["test_temporal_filter.py"]
+testpaths = ["test_temporal_filter.py", "tests/unit"]
+pythonpath = [".", "tests/unit"]

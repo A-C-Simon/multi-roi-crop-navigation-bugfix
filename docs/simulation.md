@@ -87,6 +87,8 @@ Do not run them together. Close one session before starting another.
 | `--seconds 30` | Bound the run by simulated time |
 | `--out /tmp/run-name` | Select a separate log directory |
 | `--tof` | Enable the experimental range-sensor command guard |
+| `--lookahead` | Enable lookahead corridor memory (launch `lookahead:=true`) |
+| `--camera-timeout 1.0` | Command a stop after 1.0 s without camera frames (launch `camera_timeout:=1.0`) |
 
 Non-snapshot row counts generate cached fields under
 `~/.cache/crop-row-fields`. Row changing is intended for straight fields and
@@ -109,10 +111,23 @@ the second. The probe records images without driving.
 
 ## Results and configuration
 
-Logs contain commands, image features, odometry, and lane cross-track error.
-The simulator adapter uses paper morphology and temporal filtering without a
-lookahead map. The offline video CLI uses different defaults. See
+Logs contain commands, image features, odometry, lane cross-track error, the
+control interval, whether the frame produced an observation, the track source
+and the map status.
+The simulator adapter uses paper morphology and temporal filtering. Lookahead
+memory is off by default to keep the historical adapter configuration;
+`lookahead:=true` runs the complete design with search-window seeding and the
+remembered corridor. The offline video CLI uses different defaults. See
 [architecture](architecture.md) before comparing their results.
+
+The node passes the interval between camera image stamps (simulation time) to
+the controller. A decode or pipeline failure publishes a zero command for that
+frame and the run-end checks (time, lane end, laps) still run. Frames without
+crops are not failures: the established track is held. The camera watchdog is
+disabled by default (`camera_timeout:=0`); a positive value publishes zero
+commands while no frames arrive. Publishing `/reset_rover` also resets the
+navigation state. Before the first observed track the node commands zero
+velocity.
 
 The ToF guard is an experimental simulator feature. It is not a substitute for
 an independent stop mechanism. No hardware driver is included.

@@ -151,6 +151,7 @@ def build_pipeline(algorithm: str):
         sys.path.insert(0, _multiroi_dir())
         from mr_vs import MultiROIVS, MRVSParams
         from temporal_filter import TemporalNavigationFilter, TemporalFilterParams
+        from lookahead_corridor_map import LookaheadCorridorMap, LookaheadParams
         from test_multi_roi import MultiROIDetector
         from run_mr_navigation import process_image
 
@@ -210,14 +211,31 @@ def build_pipeline(algorithm: str):
                     lambda_x=lx, lambda_theta=lt, heading_gate=hg, ki=ki))
                 self.t_filter = TemporalNavigationFilter(
                     TemporalFilterParams(image_width=640, image_height=480,
-                                         n_strips=self.detector.n))
+                                         n_strips=self.detector.n,
+                                         ignore_initial=self.detector.ignore_initial))
+                # Lookahead corridor memory (search-window seeding + remembered
+                # corridor). Off by default to keep the historical adapter
+                # configuration; MRSIM_LOOKAHEAD=1 (launch lookahead:=true,
+                # run_sim.sh --lookahead) runs the complete design.
+                self.use_lookahead = str(os.environ.get(
+                    "MRSIM_LOOKAHEAD", "0")).lower() in ("1", "true", "yes")
+                self.lookahead_map = None
+                if self.use_lookahead:
+                    self.lookahead_map = LookaheadCorridorMap(LookaheadParams(
+                        image_width=640, image_height=480,
+                        n_bins=self.detector.n,
+                        ignore_initial=self.detector.ignore_initial,
+                        vertical_coverage=vc))
                 self.vs.reset_smoother()
                 self.last_w = 0.0
 
-            def process(self, bgr):
+            def process(self, bgr, dt=None):
+                """dt: source interval in seconds (simulation-time image
+                stamps). None falls back to the host clock."""
                 out = process_image(bgr, self.detector, self.vs, draw=True,
-                                    t_filter=self.t_filter, last_w=self.last_w,
-                                    lookahead_map=None,
+                                    t_filter=self.t_filter, dt=dt,
+                                    last_w=self.last_w,
+                                    lookahead_map=self.lookahead_map,
                                     use_ff=True, ff_gain=self.ff_gain,
                                     ff_mem=self.ff_mem)
                 self.last_w = float(out["w"])
@@ -236,9 +254,13 @@ def build_pipeline(algorithm: str):
                     pass
                 return out
 
-            def reset(self):  # for odometry/teleop mode changes
+            def reset(self):  # lane changes, respawn, mode changes
                 self.last_w = 0.0
                 self.vs.reset_smoother()
+                self.t_filter.reset()
+                if self.lookahead_map is not None:
+                    self.lookahead_map.reset()
+                self.ff_mem.clear()
 
         return _MultiROIPipeline()
 

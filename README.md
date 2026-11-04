@@ -7,19 +7,26 @@ reproductions, and subsequent corrections belong here.
 
 ## Current stage
 
-Review against the corridor-tracking design. The smoother, strict holds and
-lookahead memory deliberately protect the tracked furrow from noisy detections.
-The latest review distinguishes those protections from arithmetic errors,
-evidence-handling errors and unresolved recovery requirements.
+Fixes implemented and validated in this repository, not yet published.
+Confirmed defects from the audit have been corrected in this repository while keeping the corridor-tracking design:
+strict holds against unsupported sharp changes, lookahead memory guiding the
+search windows, and command smoothing. Start with the
+[implementation report](audit/implementation/REPORT.md), which lists each
+root cause, the design choices, the exact validation commands and results,
+the simulation evidence, and the open policy questions.
 
-Start with the [design review](audit/reports/design-intent-review.md) and the
-[Opus reassessment](audit/reports/design-intent-reassessment.md). Six additional
-local sequences demonstrate both useful noise rejection and remaining defects.
-No runtime corrections have been applied.
+The review history remains available: the
+[design review](audit/reports/design-intent-review.md), the
+[Opus reassessment](audit/reports/design-intent-reassessment.md), the
+[prior-audit comparison](audit/reports/prior-audit-comparison.md) and the
+[reproduction instructions](audit/reproductions/README.md). Baseline evidence
+under `audit/evidence` describes the unmodified baseline and is not updated.
 
-Earlier severity counts and the [prior-audit comparison](audit/reports/prior-audit-comparison.md)
-remain available as review history. The [reproduction instructions](audit/reproductions/README.md)
-cover the original diagnostics and the new design sequences.
+Validation covers 108 passing tests, the CLI examples, and headless Gazebo
+runs (straight, curved and crop-gap fields with memory off and on, line mode,
+and injected perception failure and camera stall). The curved-field error and
+row-end behaviour remain open; see the report. No physical robot has been
+tested. The official repository is unchanged.
 
 ## Baseline
 
@@ -29,6 +36,7 @@ cover the original diagnostics and the new design sequences.
 | Starting revision | `d5c68594e8e633b4569a4a59f8c60f33ac785cf0` |
 | Software version | `0.1.0` |
 | Workflow | Independent audit, reproduction, findings review, then corrections |
+| Corrections | Recorded in `audit/implementation/change-manifest.json` against the snapshot |
 
 The source history and implementation files are retained from the official
 project. See [the baseline record](audit/BASELINE.md) and

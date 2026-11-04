@@ -32,7 +32,8 @@ Selected result fields:
 | --- | --- |
 | `binary` | Segmented mask in cropped image coordinates |
 | `crop_offset` | Pixel offset from cropped to full image coordinates |
-| `nav_line` | Line represented as `y = slope*x + intercept`, or `None` |
+| `nav_line` | Line represented as `y = slope*x + intercept`, or `None` without an observed line |
+| `nav_source` | `observed`, `prior` (lookahead-seeded, no observed line) or `none` |
 | `nav_curve` | Sampled `(x, y)` spline points, or `None` |
 | `q_accepted`, `q_rejected` | Points assigned to the fit and rejected points |
 | `n_two_sided` | Number of measured strips counted by the detector |
@@ -68,7 +69,10 @@ output = process_image(
 print(output["v"], output["w"], output["info"])
 ```
 
-Here `dt` is the interval between source frames in seconds. On later frames,
+Here `dt` is the interval between source frames in seconds.
+`output["info"]["has_observation"]` reports a fresh observed line;
+`has_track` (also exposed as `has_line`) reports that a track is available,
+including a held or remembered one during short gaps. On later frames,
 pass the previous returned angular command as `last_w`. A temporal filter
 is stateful. Call `state_filter.reset()` and `controller.reset_smoother()`
 when a stream ends or the camera jumps to an unrelated scene.

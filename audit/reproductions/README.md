@@ -54,3 +54,14 @@ The script prints observations; successful execution does not mean every
 observation is desired behaviour. See the
 [design review](../reports/design-intent-review.md) and
 [recorded results](../evidence/design-intent-results.json).
+
+## After the implementation stage
+
+These harnesses check for the presence of the baseline defects. After the
+corrections a non-zero exit is expected for `runtime_checks.py`: cases that no
+longer reproduce are the intended outcome, not regressions. Some cases now
+fail with explicit configuration errors (F03, P10) instead of the original
+crash, and F08 targets the old callback structure. Post-fix outputs are kept
+separately under `audit/implementation/validation/`; the baseline results in
+`audit/evidence/` are not modified. Regression protection for the corrections
+is in `tests/unit`, run by `python -m pytest`.

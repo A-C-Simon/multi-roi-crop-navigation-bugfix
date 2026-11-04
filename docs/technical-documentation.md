@@ -215,10 +215,17 @@ than 1.6 times the measured median span. The first strip is excluded by default,
 and `ignore_initial` can exclude additional bottom strips. The detector retains
 accepted and rejected point sets for inspection.
 
-When fewer than two points qualify, the implementation fits fallback strip
-midpoints. Consequently, `q_accepted` describes membership in the fitted set;
-`strip_profile.two_sided` and related evidence fields describe the observations
-that produced it.
+When fewer than two points qualify, no navigation line or curve is returned.
+The remaining midpoints were inherited from the lookahead seed or the initial
+image centre and are not measurements. `nav_source` reports `observed`,
+`prior` (no observed line, midpoints seeded from the lookahead prediction) or
+`none`, and `q_accepted` then stays empty. Consumers hold their established
+track through such frames. `n_two_sided` counts only strips at or above
+`ignore_initial`; `n_evidence_strips` is the largest value it can take.
+Midpoints are placed on the centre row of the strip that produced them.
+
+The detector rejects configurations that leave fewer than two strips for the
+navigation fit (for example `n_strips=1`, or `ignore_initial` too large).
 
 ## 5. Line and curve representation
 
@@ -252,9 +259,18 @@ exceeds an envelope derived from 15% of the measured median flank span. The
 result is returned as sampled `(x, y)` pairs. A line remains available as the
 reference representation.
 
+Up to two outlier midpoints are removed against the curve, and the spline is
+refitted on the retained subset each time, so a rejected midpoint does not
+shape the curve, its extension or its base tangent. The envelope reference
+line uses the same subset.
+
 Feature conversion uses the lowest sampled segment to calculate the curve
 heading. The detector's reported base angle is a separate diagnostic evaluated
-at the deepest measured spline position.
+at the deepest retained spline position.
+
+For a vertical point set the TLS line is stored as a steep line with slope
+`+/-1e6` and intercept `-slope*x`, which encodes `x` for either sign of the
+principal direction.
 
 ![Field-image detector composite](assets/detector-preview.png)
 
@@ -266,11 +282,25 @@ fitting on the bundled field photograph.*
 `LookaheadCorridorMap` maintains one bin per configured strip. A bin contains
 centre, width, flank positions, confidence, age, and evidence state.
 
+Bins, predictions and the detector prior use the detector frame (the cropped
+mask and the detector's own strip rows). Values returned for control and
+drawing are in full-image coordinates and refer to the image bottom row, like
+the raw feature `P`. Headings use the controller convention (positive when the
+corridor leans right toward the top of the image).
+
 Prediction shifts the previous map by a configured number of image pixels per
 frame. The default shift is 14 pixels. Source bins are selected or interpolated
-using the shift expressed in strip units. Optional profile matching can choose
-an alternative shift. The shift is an image-space parameter rather than a
-physical odometry measurement.
+using the shift expressed in strip units. When one source bin is unobserved or
+decayed below `min_conf_to_update`, the more confident bin is used alone
+instead of being blended toward the placeholder centre. Optional profile
+matching can choose an alternative shift. The shift is an image-space
+parameter rather than a physical odometry measurement; `dt` and `last_w` are
+accepted but not used.
+
+The bottom reference is the effective bottom strip after `ignore_initial`, or
+the next one or two strips when it has no two-sided observation. Consistency,
+prediction, holds and the new-geometry support count all use that same
+reference strip. The map requires `n_bins` equal to the detector strip count.
 
 The update compares observed centre and width against the prediction. It also
 counts upper-strip support for the previous and candidate bottom geometry.
@@ -284,7 +314,11 @@ The decision is reported through `map_status`.
 | `occlusion_hold` | Retain predicted geometry during missing bottom observations |
 | `map_pending` | Accumulate support for conflicting geometry |
 | `map_switch` | Blend toward a candidate with sufficient accumulated support |
-| `held_no_line` | Report the low-confidence bottom-observation fallback |
+| `held_no_line` | No bottom observation and no confident memory: no track is output |
+
+`track_valid` reports whether the output may be steered on. It is false for
+`held_no_line` and for `no_map` without a bottom observation; the image-centre
+placeholder is never passed on as a measurement.
 
 The map returns corrected geometry, predictions, bin states, innovations,
 support counts, and confidence. The runner passes corrected values to the
@@ -312,7 +346,30 @@ width_gate = 0.30*max(10 px, previous_width)
 Large position or heading innovations enter the pending-candidate path.
 Candidate coherence, a count threshold of `persist_frames + spike_confirm_frames`,
 and the current two-sided evidence count govern acceptance. The default count
-threshold is seven, and the evidence floor is seven two-sided strips.
+threshold is seven. The evidence floor is `ceil(0.7 * usable strips)` with
+usable strips `n_strips - ignore_initial`, which is seven two-sided strips at
+the defaults and remains reachable when strips are ignored. An explicit
+`commit_min_two_sided` larger than the usable strip count is rejected.
+
+Inputs carry `has_observation`. A frame with a track but no fresh observation
+(a lookahead memory hold) that disagrees strongly with the state is held
+(`held`) and never starts or advances a candidate. A fresh observation close
+to the held state ends the current candidate, so its frames are no longer
+consecutive. Frames without any track keep the candidate. A state created
+without an observation (placeholder at the image centre) is replaced by the
+first observation instead of gating it.
+
+The lookahead runner supplies a map hold, occlusion hold or pending blend to
+the filter as remembered (`has_observation` false) even when other strips in
+the frame were observed; only an observed map output counts as fresh evidence.
+Remembered frames never reset or advance a pending candidate.
+
+On frames without a fresh observation, the held heading is rotated by the
+rover's own commanded yaw (`theta += held_yaw_gain * last_w * dt`,
+`held_yaw_gain = 1.0`). Without this, a held image heading keeps commanding
+the same turn while the rover rotates (seen in Gazebo at row ends). Lateral
+position is held unchanged; no translation model is applied. Set the gain to 0
+for a pure hold.
 
 Ordinary accepted measurements use exponential moving averages. Width-only
 anomalies and low-evidence measurements with small position/heading innovations
@@ -362,7 +419,15 @@ clamped before optional smoothing.
 
 With smoothing enabled, angular processing applies a low-pass update, a
 per-frame change bound based on `max_w_rate*dt`, angular clamping, and a
-deadband. Forward velocity is scaled by confidence when that option is enabled:
+deadband. The deadband applies to the returned command only; the internal
+state keeps the rate-limited value, so a steady demand above the deadband is
+issued at every update rate. `w_alpha` is defined per `w_alpha_ref_dt`
+(0.05 s) and rescaled to the actual interval, so the low-pass time constant is
+the same in physical time. One `dt` (the supplied source interval, otherwise
+the host clock between calls) drives the low-pass, rate limit and integrator.
+After the deadband, the returned command is rate-limited again, so entering or
+leaving the deadband never changes the published command by more than
+`max_w_rate*dt` per update. Forward velocity is scaled by confidence when that option is enabled:
 
 ```text
 v = vf_des * (v_min_scale + (1-v_min_scale)*confidence)
@@ -433,10 +498,20 @@ print(output["v"], output["w"], output["info"]["status"])
 
 For subsequent frames, reuse the objects and supply the previous command as
 `last_w`. Set `dt` from the source timing in integrations that provide it.
-The file-video runner uses elapsed processing time for its control interval.
-The simulator adapter leaves `dt` unspecified in `process_image()`, which uses
-the controller/filter timing paths. These timing choices should be recorded
-with each configuration.
+The file-video runner uses the file's frame timestamps (or its nominal frame
+interval), live cameras use frame arrival time, and folder sequences use a
+nominal 0.05 s. The simulator node passes the interval between image header
+stamps (simulation time). When `dt` is omitted, the host clock between calls
+is used.
+
+`output["info"]` reports `has_observation` (this frame produced an observed
+line), `has_track` (an observed, remembered or held track is available) and
+`track_source` (`observed`, `predicted` or `none`). `has_line` equals
+`has_track` for existing consumers. `filter_input_observed` reports whether
+the feature supplied to the filter was a fresh observation. Until a track has
+been established from a real observation (cold start or after a reset), the
+returned commands are zero (`no_track_stop`); travel through gaps on an
+established track continues as before.
 
 ### 9.3 Output contracts
 
@@ -461,7 +536,7 @@ cross-track error is expressed in metres relative to the configured lane.
 | Vertical coverage | 0.75 | 0.75 | 0.75 | Preset/env configured |
 | Spline | Enabled | Enabled | Enabled | Enabled unless line mode |
 | Temporal filter | Not used | Video on; folder off | Explicit construction | Enabled |
-| Lookahead map | Not used | Video on; folder off | Explicit construction | Disabled |
+| Lookahead map | Not used | Video on; folder off | Explicit construction | Disabled unless `lookahead:=true` |
 | Lateral control gain | Not used | 10.0 | 2.0 in `MRVSParams` | 2.0 default |
 | Angular command bound | Not used | 0.50 rad/s | 0.60 rad/s | 0.60 rad/s |
 | Reference speed | Not used | 0.20 m/s | 0.20 m/s | 0.20 m/s |
@@ -482,7 +557,7 @@ supply different settings. Record the effective configuration with the run.
 | `conf_decay` | 0.97 | Prediction confidence factor |
 | `persist_frames` | 4 | Temporal candidate count component |
 | `spike_confirm_frames` | 3 | Additional temporal confirmation count |
-| `commit_min_two_sided` | 7 | Evidence floor for large-jump acceptance |
+| `commit_min_two_sided_frac` | 0.7 | Evidence floor fraction of usable strips (7 of 10) |
 | `alpha_x`, `alpha_theta` | 0.35 | Accepted-state smoothing factors |
 | `alpha_width` | 0.30 | Width smoothing factor |
 | `w_alpha` | 0.35 | Angular-command low-pass factor |

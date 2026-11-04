@@ -41,6 +41,10 @@
 #     anchors the driven furrow when identical corridors compete).
 #   --lambdax/--lambdat/--gate/--ki/--ff  servo tuning (validated defaults;
 #     see farm.launch.py descriptions).
+#   --lookahead    enable lookahead corridor memory in the adapter (default
+#     off = historical configuration without search-window memory).
+#   --camera-timeout S  command a stop after S seconds without camera frames
+#     (default 0 = disabled).
 #   --tof          crop-safety guard: side + angled-front ToF rangers override vision
 #     steering when closer than --tof-min (default 0.35 m). High priority:
 #     the guard angular command replaces the servo output while violated.
@@ -142,6 +146,8 @@ while [[ $# -gt 0 ]]; do
     --line) EXTRA_ARGS+=(line_fit:=true); shift ;;
     --coverage) EXTRA_ARGS+=(vertical_coverage:="$2"); shift 2 ;;
     --init-window) EXTRA_ARGS+=(init_window:="$2"); shift 2 ;;
+    --lookahead) EXTRA_ARGS+=(lookahead:=true); shift ;;
+    --camera-timeout) EXTRA_ARGS+=(camera_timeout:="$2"); shift 2 ;;
     --lambdax) GAIN_ARGS+=(lambda_x:="$2"); shift 2 ;;
     --lambdat) GAIN_ARGS+=(lambda_theta:="$2"); shift 2 ;;
     --gate) GAIN_ARGS+=(heading_gate:="$2"); shift 2 ;;

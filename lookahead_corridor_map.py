@@ -18,6 +18,15 @@ Spatial support: a bottom conflict is only accepted if upper bins also
 support the new geometry.
 
 Output is a corrected raw-like measurement for the scalar temporal filter.
+
+Coordinate frames: bins, predictions and the detector prior live in the
+DETECTOR frame (the border-cropped binary mask, strip rows from the
+detector's strip_profile). Values returned for control and drawing
+(corrected_bottom_x, corrected_X, left/right, pred_bottom_x, raw_bottom_x)
+are in FULL-IMAGE coordinates: the crop offset is added and the bottom x
+is referred to the image bottom row like mr_vs.nav_line_to_feature's P.
+Headings use the mr_vs convention: Theta > 0 when the corridor leans
+right toward the top of the image.
 """
 
 from __future__ import annotations
@@ -104,6 +113,9 @@ class LookaheadCorridorMap:
         self._last_map_status: str = "init"
         # for shift estimation history
         self._last_raw_centers: Optional[List[float]] = None
+        # detector-frame geometry, known after the first update()
+        self._frame_known: bool = False
+        self._strip_height: Optional[float] = None
 
     def _init_bins(self):
         p = self.params
@@ -121,23 +133,35 @@ class LookaheadCorridorMap:
         self._switch_frames = 0
         self._last_map_status = "init"
         self._last_raw_centers = None
+        self._frame_known = False
+        self._strip_height = None
 
     def get_prediction(self, image_shape: Optional[Tuple[int,int]] = None) -> List[MapBin]:
         """Predicted bins for current frame (motion-compensated) without updating state.
         Used as prior for detector ROI gating. Returned list length n_bins, each MapBin with confidence.
         """
-        if image_shape is not None:
+        # The map works in the detector frame learned in update(); the shape
+        # given here (usually the full image) only seeds the geometry before
+        # the first update, when every bin still has zero confidence.
+        if image_shape is not None and not self._frame_known:
             h, w = image_shape[:2]
             self.params.image_height = h
             self.params.image_width = w
         return self._predict_bins(self.params.shift_px)
+
+    def _strip_dh(self) -> float:
+        """Strip height in detector rows (the detector's own grid if known)."""
+        if self._strip_height:
+            return float(self._strip_height)
+        p = self.params
+        return (p.image_height * float(getattr(p, "vertical_coverage", 1.0))) / max(1, p.n_bins)
 
     # --------------------------------------------------------------
     def _predict_bins(self, shift_px: float) -> List[MapBin]:
         """Motion-compensated prediction: evidence seen higher up moves down."""
         p = self.params
         n = p.n_bins
-        dh = (p.image_height * float(getattr(p, "vertical_coverage", 1.0))) / max(1, n)
+        dh = self._strip_dh()
         shift_strips = shift_px / max(1.0, dh)
         pred: List[MapBin] = []
         for i in range(n):  # i=0 bottom mu=1
@@ -170,6 +194,18 @@ class LookaheadCorridorMap:
                     pred.append(MapBin(center_x=p.image_width/2.0, width=120.0,
                                        left_x=p.image_width/2.0-60, right_x=p.image_width/2.0+60,
                                        confidence=0.0, age=999, two_sided=False))
+                    continue
+                weak = p.min_conf_to_update
+                if a.confidence < weak or b.confidence < weak:
+                    # one side is unobserved/decayed memory (its centre is the
+                    # placeholder image centre): take the more confident bin
+                    # alone instead of pulling it toward the placeholder
+                    src = a if a.confidence >= b.confidence else b
+                    pred.append(MapBin(
+                        center_x=src.center_x, width=src.width,
+                        left_x=src.left_x, right_x=src.right_x,
+                        confidence=max(0.0, src.confidence * p.conf_decay),
+                        age=src.age+1, last_update=src.last_update, two_sided=src.two_sided))
                     continue
                 # weighted average
                 cx = (1-frac)*a.center_x + frac*b.center_x
@@ -207,28 +243,50 @@ class LookaheadCorridorMap:
     # --------------------------------------------------------------
     def update(self, strip_profile: List[Dict], res: Dict,
                image_shape: Tuple[int,int], dt: Optional[float]=None,
-               last_w: Optional[float]=None) -> Dict:
+               last_w: Optional[float]=None,
+               crop_offset: Optional[Tuple[int, int]] = None) -> Dict:
         """
         Update map with current strip observations and return corrected measurement.
 
         strip_profile: list length n_bins with keys mu, y_center, center_x, width, left_x, right_x, two_sided, accepted_nav, roi
-        res: full detector res for median_width, bottom_width, n_two_sided etc.
-        image_shape: (h,w)
+            (detector frame: border-cropped binary coordinates)
+        res: full detector res for median_width, binary shape, crop_offset, strip_height
+        image_shape: (h, w) of the FULL input image (output frame)
+        crop_offset: (dx, dy) detector-to-full offset; defaults to res["crop_offset"]
+        dt, last_w: accepted for interface compatibility; motion compensation
+            uses the fixed shift_px (see LookaheadParams).
 
         Returns dict with:
           corrected_bottom_x, corrected_width, corrected_left_x, corrected_right_x,
-          corrected_theta, map_confidence, map_status,
+          corrected_theta, map_confidence, map_status, track_valid,
           raw_map_innovation_x, raw_map_innovation_width,
           spatial_support_score, support_old, support_new,
           pred_bins, bins (for overlay), conflict_frames etc.
         """
         p = self.params
+        if len(strip_profile) != p.n_bins:
+            raise ValueError(
+                f"lookahead map has n_bins={p.n_bins} but the detector strip "
+                f"profile has {len(strip_profile)} strips; configure both with "
+                "the same strip count")
         self.frame_idx += 1
-        h, w = image_shape[:2]
-        # keep params image size in sync (if video size changed)
+        h_full, w_full = image_shape[:2]
+        res = res if isinstance(res, dict) else {}
+        if crop_offset is None:
+            crop_offset = res.get("crop_offset", (0, 0)) or (0, 0)
+        ox, oy = float(crop_offset[0]), float(crop_offset[1])
+        binary = res.get("binary")
+        if binary is not None and hasattr(binary, "shape"):
+            h, w = binary.shape[:2]
+        else:
+            h, w = int(h_full - 2 * oy), int(w_full - 2 * ox)
+        # keep params in the detector frame (bins/predictions/prior)
         p.image_width = w
         p.image_height = h
-        dh = (h * float(getattr(p, "vertical_coverage", 1.0))) / max(1, p.n_bins)
+        sh = res.get("strip_height")
+        if sh:
+            self._strip_height = float(sh)
+        self._frame_known = True
 
         # optionally estimate shift by profile matching
         shift_px = p.shift_px
@@ -244,10 +302,9 @@ class LookaheadCorridorMap:
                     if not prof.get("two_sided"):
                         continue
                     raw_c = prof["center_x"]
-                    pred_c = pred_cand[mu_idx].center_x if pred_cand[mu_idx].confidence>0.15 else None
-                    if pred_c is None or pred_cand[mu_idx].confidence<0.15:
+                    if pred_cand[mu_idx].confidence < 0.15:
                         continue
-                    err += abs(raw_c - pred_c)
+                    err += abs(raw_c - pred_cand[mu_idx].center_x)
                     cnt += 1
                 if cnt >= 3:
                     err = err / cnt
@@ -270,15 +327,7 @@ class LookaheadCorridorMap:
         consistent_flags: List[bool] = []
 
         for mu_idx, prof in enumerate(strip_profile):
-            raw_c = prof["center_x"] if prof.get("two_sided") else None
-            raw_wid = prof["width"] if prof.get("two_sided") else None
-            pred = pred_bins[mu_idx] if mu_idx < len(pred_bins) else None
-            if pred is None:
-                per_strip_status.append("no_map")
-                consistent_flags.append(False)
-                per_strip_dx.append(9999)
-                per_strip_dw.append(9999)
-                continue
+            pred = pred_bins[mu_idx]
             if not prof.get("two_sided"):
                 # missing observation -> occlusion
                 per_strip_status.append("missing")
@@ -286,35 +335,51 @@ class LookaheadCorridorMap:
                 per_strip_dx.append(9999)
                 per_strip_dw.append(9999)
                 continue
-            cons, dx, dw = self._per_strip_gate(raw_c, raw_wid, pred, median_w)
+            cons, dx, dw = self._per_strip_gate(prof["center_x"], prof["width"], pred, median_w)
             consistent_flags.append(cons)
             per_strip_dx.append(dx)
             per_strip_dw.append(dw)
             per_strip_status.append("map_accept" if cons else "map_reject")
 
+        # --- bottom reference strip ---
+        # The effective bottom (after ignore_initial) is the reference. When
+        # it has no two-sided observation, the next one or two strips up act
+        # as a proxy. Everything below (consistency, prediction, support,
+        # holds) uses the SAME reference strip and its own row prediction.
+        ref_idx = eff_bottom_idx
+        bottom_missing = not strip_profile[eff_bottom_idx].get("two_sided")
+        if bottom_missing:
+            for k in range(eff_bottom_idx + 1, min(p.n_bins, eff_bottom_idx + 3)):
+                if strip_profile[k].get("two_sided"):
+                    ref_idx = k
+                    bottom_missing = False
+                    break
+        ref_prof = strip_profile[ref_idx]
+        bottom_raw_c = float(ref_prof["center_x"]) if not bottom_missing else None
+        bottom_raw_w = float(ref_prof["width"]) if not bottom_missing else None
+        bottom_consistent = consistent_flags[ref_idx] if not bottom_missing else False
+        y_ref = float(ref_prof["y_center"])
+        pred_bottom = pred_bins[ref_idx]
+        pred_conf = pred_bottom.confidence
+
         # spatial support evaluation for future vs local
-        # define upper bins: mu >= upper_start (1-indexed)
-        upper_indices = [i for i in range(p.n_bins) if (i+1) >= p.upper_start]
-        # bottom raw values for comparison
-        bottom_prof = strip_profile[0] if strip_profile else None
-        bottom_raw_c = bottom_prof["center_x"] if bottom_prof and bottom_prof.get("two_sided") else None
-        bottom_raw_w = bottom_prof["width"] if bottom_prof and bottom_prof.get("two_sided") else None
-        # support_old: upper raw consistent with predicted map (old corridor)
+        # upper bins: mu >= upper_start (1-indexed) and above the reference
+        upper_indices = [i for i in range(p.n_bins)
+                         if (i+1) >= p.upper_start and i > ref_idx]
         support_old = 0
         support_new = 0
         for idx in upper_indices:
-            prof = strip_profile[idx] if idx < len(strip_profile) else None
-            if prof is None or not prof.get("two_sided"):
+            prof = strip_profile[idx]
+            if not prof.get("two_sided"):
                 continue
             # check vs predicted old map
-            pred = pred_bins[idx] if idx < len(pred_bins) else None
-            if pred and pred.confidence > p.min_conf_for_hold:
+            pred = pred_bins[idx]
+            if pred.confidence > p.min_conf_for_hold:
                 cons_old, _, _ = self._per_strip_gate(prof["center_x"], prof["width"], pred, median_w)
                 if cons_old:
                     support_old += 1
-            # check vs bottom new value (if bottom valid)
+            # check vs the reference bottom's new value (if valid)
             if bottom_raw_c is not None and bottom_raw_w is not None:
-                # use same gates but with bottom as reference
                 ref_w = max(p.min_width_px, bottom_raw_w)
                 c_gate = max(p.min_center_gate_px, p.max_center_gate_frac * ref_w)
                 w_gate = p.max_width_gate_frac * ref_w
@@ -323,78 +388,37 @@ class LookaheadCorridorMap:
                 if dx_n <= c_gate and dw_n <= w_gate:
                     support_new += 1
 
-        # bottom classification overall (effective bottom after ignore_initial)
-        bottom_idx = eff_bottom_idx
-        bottom_consistent = consistent_flags[bottom_idx] if len(consistent_flags)>bottom_idx else False
-        # find first non-missing effective bottom if the exact eff is missing (approach phase)
-        # keep eff as is for pred, but raw may be missing
-        if strip_profile and bottom_idx < len(strip_profile):
-            bottom_missing = strip_profile[bottom_idx].get("two_sided") == False
-            bottom_raw_c_tmp = strip_profile[bottom_idx].get("center_x") if not bottom_missing else None
-            bottom_raw_w_tmp = strip_profile[bottom_idx].get("width") if not bottom_missing else None
-        else:
-            bottom_missing = True
-            bottom_raw_c_tmp = None
-            bottom_raw_w_tmp = None
-        # if effective bottom is missing, try next higher strip for raw (still use eff pred for gate)
-        if bottom_missing:
-            # look ahead one or two strips up for a valid raw to assess spatial support
-            for k in range(bottom_idx+1, min(p.n_bins, bottom_idx+3)):
-                if k < len(strip_profile) and strip_profile[k].get("two_sided"):
-                    bottom_raw_c_tmp = strip_profile[k].get("center_x")
-                    bottom_raw_w_tmp = strip_profile[k].get("width")
-                    # keep bottom_missing False for decision (use this as proxy)
-                    bottom_raw_c = bottom_raw_c_tmp
-                    bottom_raw_w = bottom_raw_w_tmp
-                    bottom_missing = False
-                    break
-            else:
-                bottom_raw_c = bottom_raw_c_tmp
-                bottom_raw_w = bottom_raw_w_tmp
-        else:
-            bottom_raw_c = bottom_raw_c_tmp
-            bottom_raw_w = bottom_raw_w_tmp
-        pred_bottom = pred_bins[bottom_idx] if len(pred_bins)>bottom_idx else None
-        pred_conf = pred_bottom.confidence if pred_bottom else 0.0
-
         # determine map_status for bottom and corrected values
         # defaults: if no map, use raw
         raw_bottom_x = bottom_raw_c if bottom_raw_c is not None else w/2.0
         raw_width = bottom_raw_w if bottom_raw_w is not None else median_w
-        # also need raw_theta: estimate from strip_profile line fit or from res nav
-        # Use only strips >= eff_bottom_idx that are two_sided
+        # raw heading from two-sided strips at/above the effective bottom
+        # (fit x = a*y + b in image rows; mr_vs convention Theta = -atan(a))
         raw_theta = 0.0
         try:
             pts = [(prof["center_x"], prof["y_center"]) for idx, prof in enumerate(strip_profile) if prof.get("two_sided") and idx >= eff_bottom_idx]
             if len(pts) >= 2:
-                xs = np.array([p[0] for p in pts], dtype=float)
-                ys = np.array([p[1] for p in pts], dtype=float)
+                xs = np.array([q[0] for q in pts], dtype=float)
+                ys = np.array([q[1] for q in pts], dtype=float)
                 A = np.vstack([ys, np.ones(len(ys))]).T
                 a, b = np.linalg.lstsq(A, xs, rcond=None)[0]
-                raw_theta = math.atan(a)  # a = dx/dy, theta = atan(dx/dy)
-            elif len(pts) == 1:
-                raw_theta = 0.0
-            else:
-                raw_theta = 0.0
+                raw_theta = -math.atan(a)
         except Exception:
             raw_theta = 0.0
 
-        # decide corrected
+        # decide corrected (values at the reference row, detector frame)
         map_status = "no_map"
         corrected_bottom_x = raw_bottom_x
         corrected_width = raw_width
-        # use effective bottom's left/right
-        eff_prof = strip_profile[bottom_idx] if strip_profile and bottom_idx < len(strip_profile) else None
-        if eff_prof and eff_prof.get("left_x") is not None:
-            corrected_left_x = float(eff_prof.get("left_x"))
-            corrected_right_x = float(eff_prof.get("right_x"))
+        if ref_prof.get("left_x") is not None and not bottom_missing:
+            corrected_left_x = float(ref_prof.get("left_x"))
+            corrected_right_x = float(ref_prof.get("right_x"))
         else:
             corrected_left_x = float(raw_bottom_x - raw_width/2)
             corrected_right_x = float(raw_bottom_x + raw_width/2)
-        map_confidence = pred_conf if pred_conf>0 else 0.0
         innovation_x = 0.0
         innovation_width = 0.0
-        if pred_bottom and pred_bottom.confidence > 0:
+        if pred_bottom.confidence > 0:
             innovation_x = (raw_bottom_x - pred_bottom.center_x) if bottom_raw_c is not None else 0.0
             innovation_width = (raw_width - pred_bottom.width) if bottom_raw_w is not None else 0.0
 
@@ -417,9 +441,9 @@ class LookaheadCorridorMap:
                 # slight decay already in pred, no extra
                 self._conflict_frames = 0
             else:
+                # no observation and no confident memory: no track output
                 map_status = "held_no_line"
-                # keep raw bottom estimate (center)
-                corrected_bottom_x = raw_bottom_x  # w/2 fallback
+                corrected_bottom_x = raw_bottom_x
         elif bottom_consistent:
             # raw agrees with map -> accept and update map
             map_status = "map_accept"
@@ -439,8 +463,6 @@ class LookaheadCorridorMap:
                 corrected_right_x = pred_bottom.right_x
                 self._conflict_frames += 1
                 self._switch_frames = 0
-                # reduce map confidence slightly due to conflict
-                map_confidence = max(0.0, pred_conf * 0.97)
             elif support_new >= p.accept_bins:
                 # new geometry has spatial support -> may be genuine shift, require temporal persistence
                 self._conflict_frames += 1
@@ -451,7 +473,8 @@ class LookaheadCorridorMap:
                     blend = 0.35
                     corrected_bottom_x = (1-blend)*pred_bottom.center_x + blend*raw_bottom_x
                     corrected_width = (1-p.map_alpha)*pred_bottom.width + p.map_alpha*raw_width
-                    # after switch, map will be updated to new
+                    # upper bins follow the new geometry below; the bottom
+                    # bins keep their prediction until it is consistent again
                     self._conflict_frames = 0
                     self._switch_frames = 0
                 else:
@@ -468,22 +491,36 @@ class LookaheadCorridorMap:
                 self._conflict_frames += 1
                 self._switch_frames = 0
 
-        # compute corrected theta: fit through corrected map? Simplify:
-        # if map_hold, predicted theta from map slope; if accept, raw theta; if switch/pending, blend
-        # Estimate predicted theta from pred_bins line
+        # Track validity: a value the controller may steer on. False when
+        # neither a fresh bottom observation nor confident memory exists
+        # (the w/2 placeholder must never be passed on as a measurement).
+        if map_status == "held_no_line":
+            track_valid = False
+        elif map_status == "no_map":
+            track_valid = bottom_raw_c is not None
+        else:
+            track_valid = True
+        if map_status in ("occlusion_hold", "map_hold"):
+            track_source = "predicted"
+        elif map_status == "map_pending":
+            track_source = "blended"
+        elif track_valid:
+            track_source = "observed"
+        else:
+            track_source = "none"
+
+        # predicted heading from confident predicted bins (same convention)
         pred_theta = 0.0
         try:
-            # fit x vs y for pred bins with decent confidence
             pts_pred = []
             for i, b in enumerate(pred_bins):
                 if b.confidence > 0.2:
-                    y = strip_profile[i]["y_center"] if i < len(strip_profile) else (h - (i+0.5)* (h/p.n_bins))
-                    pts_pred.append((b.center_x, y))
+                    pts_pred.append((b.center_x, strip_profile[i]["y_center"]))
             if len(pts_pred) >= 2:
-                xs = np.array([p[0] for p in pts_pred]); ys = np.array([p[1] for p in pts_pred])
+                xs = np.array([q[0] for q in pts_pred]); ys = np.array([q[1] for q in pts_pred])
                 A = np.vstack([ys, np.ones(len(ys))]).T
                 a, b = np.linalg.lstsq(A, xs, rcond=None)[0]
-                pred_theta = math.atan(a)
+                pred_theta = -math.atan(a)
         except Exception:
             pred_theta = 0.0
 
@@ -500,7 +537,7 @@ class LookaheadCorridorMap:
         # For each bin, if raw exists and was consistent (or we are in switch), update towards raw; else keep predicted with decay
         new_bins: List[MapBin] = []
         for i, prof in enumerate(strip_profile):
-            pred = pred_bins[i] if i < len(pred_bins) else None
+            pred = pred_bins[i]
             raw_c = prof["center_x"] if prof.get("two_sided") else None
             raw_wid = prof["width"] if prof.get("two_sided") else None
             raw_l = prof.get("left_x")
@@ -508,18 +545,15 @@ class LookaheadCorridorMap:
             # decide per-bin update
             if not prof.get("two_sided"):
                 # missing -> keep predicted with decay (already decayed)
-                nb = MapBin(center_x=pred.center_x if pred else w/2.0,
-                            width=pred.width if pred else 120.0,
-                            left_x=pred.left_x if pred else w/2.0-60,
-                            right_x=pred.right_x if pred else w/2.0+60,
-                            confidence=max(0.0, (pred.confidence*0.97) if pred else 0.0),
-                            age=(pred.age+1 if pred else 999),
-                            last_update=pred.last_update if pred else 0,
+                nb = MapBin(center_x=pred.center_x, width=pred.width,
+                            left_x=pred.left_x, right_x=pred.right_x,
+                            confidence=max(0.0, pred.confidence*0.97),
+                            age=pred.age+1, last_update=pred.last_update,
                             two_sided=False)
                 new_bins.append(nb)
                 continue
             # raw exists
-            cons = per_strip_status[i] == "map_accept" if i < len(per_strip_status) else False
+            cons = per_strip_status[i] == "map_accept"
             # For bins where map_status is hold/occlusion, we should NOT update effective bottom bins with raw conflicting value
             is_eff_bottom = (eff_bottom_idx <= i < eff_bottom_idx + p.bottom_bins)
             if map_status in ("map_hold", "occlusion_hold") and is_eff_bottom:
@@ -532,18 +566,18 @@ class LookaheadCorridorMap:
             elif map_status == "map_pending" and is_eff_bottom:
                 # slight update
                 alpha = 0.08
-                cx = (1-alpha)*pred.center_x + alpha*raw_c if pred else raw_c
-                wid = (1-0.05)*pred.width + 0.05*raw_wid if pred else raw_wid
+                cx = (1-alpha)*pred.center_x + alpha*raw_c
+                wid = (1-0.05)*pred.width + 0.05*raw_wid
                 lx = raw_l if raw_l is not None else (cx - wid/2)
                 rx = raw_r if raw_r is not None else (cx + wid/2)
-                conf = (1-p.conf_alpha)* (pred.confidence if pred else 0) + p.conf_alpha*0.6
+                conf = (1-p.conf_alpha)*pred.confidence + p.conf_alpha*0.6
                 nb = MapBin(center_x=cx, width=wid, left_x=lx, right_x=rx,
                             confidence=max(0.0, min(1.0, conf)), age=0, last_update=self.frame_idx, two_sided=True)
                 new_bins.append(nb)
             else:
                 # check if this upper strip supports the new bottom geometry (true shift)
                 supports_new_here = False
-                if bottom_raw_c is not None and raw_c is not None and bottom_raw_w is not None and raw_wid is not None:
+                if bottom_raw_c is not None and bottom_raw_w is not None:
                     ref_w2 = max(p.min_width_px, bottom_raw_w)
                     c_gate2 = max(p.min_center_gate_px, p.max_center_gate_frac * ref_w2)
                     w_gate2 = p.max_width_gate_frac * ref_w2
@@ -553,21 +587,21 @@ class LookaheadCorridorMap:
                 if map_status in ("map_pending", "map_switch") and supports_new_here and (i+1) >= p.upper_start:
                     # update upper toward new raw
                     alpha_up = 0.30 if map_status == "map_switch" else 0.15
-                    cx = (1-alpha_up)*(pred.center_x if pred and pred.confidence>0.05 else raw_c) + alpha_up*raw_c
-                    wid = (1-alpha_up)*(pred.width if pred and pred.confidence>0.05 else raw_wid) + alpha_up*raw_wid
+                    cx = (1-alpha_up)*(pred.center_x if pred.confidence>0.05 else raw_c) + alpha_up*raw_c
+                    wid = (1-alpha_up)*(pred.width if pred.confidence>0.05 else raw_wid) + alpha_up*raw_wid
                     lx = raw_l if raw_l is not None else (cx - wid/2)
                     rx = raw_r if raw_r is not None else (cx + wid/2)
-                    conf = (1-p.conf_alpha)*(pred.confidence if pred else 0) + p.conf_alpha*0.7
+                    conf = (1-p.conf_alpha)*pred.confidence + p.conf_alpha*0.7
                     nb = MapBin(center_x=cx, width=wid, left_x=lx, right_x=rx,
                                 confidence=max(0.0, min(1.0, conf)), age=0, last_update=self.frame_idx, two_sided=True)
                     new_bins.append(nb)
                 elif cons:
                     # update towards raw
-                    cx = (1-p.map_alpha)*pred.center_x + p.map_alpha*raw_c if pred and pred.confidence>0.05 else raw_c
-                    wid = (1-p.map_alpha)*pred.width + p.map_alpha*raw_wid if pred and pred.confidence>0.05 else raw_wid
+                    cx = (1-p.map_alpha)*pred.center_x + p.map_alpha*raw_c if pred.confidence>0.05 else raw_c
+                    wid = (1-p.map_alpha)*pred.width + p.map_alpha*raw_wid if pred.confidence>0.05 else raw_wid
                     lx = raw_l if raw_l is not None else (cx - wid/2)
                     rx = raw_r if raw_r is not None else (cx + wid/2)
-                    conf = (1-p.conf_alpha)*(pred.confidence if pred else 0) + p.conf_alpha*1.0
+                    conf = (1-p.conf_alpha)*pred.confidence + p.conf_alpha*1.0
                     if prof.get("accepted_nav"):
                         conf = min(1.0, conf+0.05)
                     nb = MapBin(center_x=cx, width=wid, left_x=lx, right_x=rx,
@@ -576,7 +610,7 @@ class LookaheadCorridorMap:
                 else:
                     # inconsistent but not bottom hold -> keep predicted but decay more
                     # This may happen for isolated upper outlier -> keep predicted
-                    if pred and pred.confidence > p.min_conf_for_hold:
+                    if pred.confidence > p.min_conf_for_hold:
                         nb = MapBin(center_x=pred.center_x, width=pred.width,
                                     left_x=pred.left_x, right_x=pred.right_x,
                                     confidence=max(0.0, pred.confidence*0.95),
@@ -601,53 +635,75 @@ class LookaheadCorridorMap:
         # spatial support score: support_old vs support_new ratio
         spatial_score = float(support_old - support_new)  # positive means old supported
 
-        # final corrected values for controller (bottom)
-        corrected_X = corrected_bottom_x - w/2.0
+        # --- output frame: full image, bottom row (same reference as mr_vs P) ---
+        # Extrapolate the reference-row centre to the detector's bottom row
+        # along the corrected heading, then add the crop offset.
+        tan_t = math.tan(float(np.clip(corrected_theta, -math.radians(45), math.radians(45))))
+        y_bot_det = float(h - 1)
+        bottom_x_det = corrected_bottom_x - (y_bot_det - y_ref) * tan_t
+        corrected_bottom_full = bottom_x_det + ox
+        corrected_X = corrected_bottom_full - w_full/2.0
 
-        # we also need to provide per-bin for overlay
         return {
-            "corrected_bottom_x": float(corrected_bottom_x),
+            "corrected_bottom_x": float(corrected_bottom_full),
             "corrected_width": float(corrected_width),
-            "corrected_left_x": float(corrected_left_x),
-            "corrected_right_x": float(corrected_right_x),
+            "corrected_left_x": float(corrected_left_x + ox),
+            "corrected_right_x": float(corrected_right_x + ox),
+            "corrected_ref_y": float(y_ref + oy),
             "corrected_theta": float(corrected_theta),
             "corrected_X": float(corrected_X),
             "map_confidence": float(avg_conf),
             "map_status": map_status,
+            "track_valid": bool(track_valid),
+            "track_source": track_source,
             "raw_map_innovation_x": float(innovation_x),
             "raw_map_innovation_width": float(innovation_width),
             "spatial_support_old": int(support_old),
             "spatial_support_new": int(support_new),
             "spatial_score": float(spatial_score),
-            "pred_bottom_x": float(pred_bottom.center_x) if pred_bottom else float(w/2.0),
-            "pred_width": float(pred_bottom.width) if pred_bottom else 120.0,
+            "pred_bottom_x": float(pred_bottom.center_x + ox),
+            "pred_width": float(pred_bottom.width),
             "pred_theta": float(pred_theta),
             "bottom_consistent": bool(bottom_consistent),
             "bottom_missing": bool(bottom_missing),
+            "bottom_ref_idx": int(ref_idx),
             "conflict_frames": int(self._conflict_frames),
             "switch_frames": int(self._switch_frames),
             "per_strip_status": per_strip_status,
             "per_strip_dx": per_strip_dx,
             "per_strip_dw": per_strip_dw,
-            "pred_bins": pred_bins,  # for diagnostics/overlay
-            "bins": list(self.bins),  # current map
+            "pred_bins": pred_bins,  # detector frame, for diagnostics/overlay
+            "bins": list(self.bins),  # current map, detector frame
+            "crop_offset": (int(ox), int(oy)),
             "shift_px": float(shift_px),
-            "raw_bottom_x": float(raw_bottom_x),
+            "raw_bottom_x": float(raw_bottom_x + ox),
             "raw_width": float(raw_width),
             "frame_idx": int(self.frame_idx),
         }
 
-    def get_map_overlay(self, image_shape: Tuple[int,int]) -> List[Tuple[int,int,int,int]]:
-        """Return map bins as rectangles for overlay: list of (x_lo,x_hi,y_top,y_bot)"""
-        h,w = image_shape[:2]
-        n = self.params.n_bins
-        dh = (h * float(getattr(self.params, "vertical_coverage", 1.0))) / max(1,n)
-        rects=[]
-        for i,b in enumerate(self.bins):
-            mu = i+1
-            y_top = int(max(0, h - mu*dh))
-            y_bot = int(y_top+dh)
-            x_lo = int(max(0, b.center_x - b.width/2))
-            x_hi = int(min(w, b.center_x + b.width/2))
-            rects.append((x_lo,x_hi,y_top,y_bot))
+    def get_map_overlay(self, image_shape: Tuple[int,int], res: Optional[Dict] = None,
+                        bins: Optional[List[MapBin]] = None) -> List[Tuple[int,int,int,int]]:
+        """Map bins as full-image rectangles (x_lo, x_hi, y_top, y_bot).
+
+        Uses the detector's strip rows (res["strip_profile"]) and crop offset
+        when given, so boxes line up with the detector ROIs; otherwise the
+        map's own strip grid with no offset.
+        """
+        h, w = image_shape[:2]
+        bins = self.bins if bins is None else bins
+        prof = (res or {}).get("strip_profile") or []
+        ox, oy = (res or {}).get("crop_offset", (0, 0)) or (0, 0)
+        dh = self._strip_dh()
+        hb = self.params.image_height
+        rects = []
+        for i, b in enumerate(bins):
+            if i < len(prof):
+                y_top = int(prof[i]["y_top"]) + int(oy)
+                y_bot = int(prof[i]["y_bot"]) + int(oy)
+            else:
+                y_top = int(max(0, hb - (i+1)*dh)) + int(oy)
+                y_bot = int(y_top + dh)
+            x_lo = int(max(0, b.center_x - b.width/2 + ox))
+            x_hi = int(min(w, b.center_x + b.width/2 + ox))
+            rects.append((x_lo, x_hi, max(0, y_top), min(h, y_bot)))
         return rects

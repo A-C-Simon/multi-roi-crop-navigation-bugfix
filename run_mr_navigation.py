@@ -92,6 +92,9 @@ def _build_raw_dict(res, F, PQ, image_shape):
         if not math.isfinite(raw_width) or raw_width < 5:
             raw_width = 120.0
 
+    # provenance: a returned line is only an observation when the detector
+    # fitted it to measured two-sided midpoints
+    observed = bool(has_line and res.get("nav_observed", True))
     return {
         "raw_bottom_x": float(raw_bottom_x),
         "raw_theta": float(raw_theta),
@@ -100,6 +103,8 @@ def _build_raw_dict(res, F, PQ, image_shape):
         "raw_err_x": float(raw_err_x),
         "raw_err_theta_deg": float(raw_err_theta),
         "has_line": bool(has_line),
+        "has_observation": observed,
+        "n_evidence_strips": int(res.get("n_evidence_strips", 0) or 0),
         "n_two_sided": int(res.get("n_two_sided", 0)),
         "n_q_accepted": int(res.get("n_q_accepted", 0)),
         "n_q_rejected": int(res.get("n_q_rejected", 0)),
@@ -130,6 +135,15 @@ def process_image(bgr, detector, vs, draw=True, t_filter=None, dt=None, last_w=N
     """
     t0 = time.perf_counter()
     h, w = bgr.shape[:2]
+    # geometry follows the actual frame for the filter (thresholds, centre)
+    # and, when requested, for the controller normalization
+    if t_filter is not None and (t_filter.params.image_width != w
+                                 or t_filter.params.image_height != h):
+        t_filter.params.image_width = w
+        t_filter.params.image_height = h
+    if getattr(vs.params, "geometry_from_frame", False):
+        vs.params.width = w
+        vs.params.height = h
     # lookahead prior for detector ROI hold (boxes/midpoints stay steady)
     lookahead_prior = None
     if lookahead_map is not None:
@@ -190,7 +204,8 @@ def process_image(bgr, detector, vs, draw=True, t_filter=None, dt=None, last_w=N
     corrected_for_temporal = raw_dict
     if lookahead_map is not None:
         strip_profile = res.get("strip_profile", [])
-        map_out = lookahead_map.update(strip_profile, res, (h, w), dt=dt, last_w=last_w)
+        map_out = lookahead_map.update(strip_profile, res, (h, w), dt=dt, last_w=last_w,
+                                       crop_offset=crop_offset)
         # Build corrected dict that temporal filter will consume
         # Preserve original raw for diagnostics but feed corrected values as "raw" to temporal
         corrected_for_temporal = {
@@ -200,7 +215,17 @@ def process_image(bgr, detector, vs, draw=True, t_filter=None, dt=None, last_w=N
             "raw_X": float(map_out["corrected_X"]),
             "raw_err_x": float(map_out["corrected_X"]),
             "raw_err_theta_deg": float(math.degrees(map_out["corrected_theta"])),
-            "has_line": bool(raw_dict["has_line"] or map_out["map_confidence"] > 0.15),
+            # the map supplies a track when it has a fresh bottom observation
+            # or confident memory; its placeholder centre is never a track
+            "has_line": bool(map_out["track_valid"]),
+            # provenance of the SUPPLIED feature: a map hold/occlusion hold or
+            # a pending blend is mostly remembered geometry, even when other
+            # strips in the frame were observed, so it is not fresh evidence
+            # for the filter's persistence logic. Only an observed map output
+            # (no_map with a bottom observation, map_accept, map_switch) is.
+            "has_observation": bool(raw_dict["has_observation"]
+                                    and map_out.get("track_source") == "observed"),
+            "n_evidence_strips": int(raw_dict["n_evidence_strips"]),
             "n_two_sided": int(raw_dict["n_two_sided"]),
             "n_q_accepted": int(raw_dict["n_q_accepted"]),
             "n_q_rejected": int(raw_dict["n_q_rejected"]),
@@ -212,6 +237,10 @@ def process_image(bgr, detector, vs, draw=True, t_filter=None, dt=None, last_w=N
             "orig_raw_width": float(raw_dict["raw_width"]),
             "orig_raw_theta": float(raw_dict["raw_theta"]),
         }
+        if not map_out["track_valid"] and raw_dict["has_line"]:
+            # map not confident and no bottom observation: the detector's
+            # own observed line is the best available measurement
+            corrected_for_temporal = dict(raw_dict)
 
     # choose which dict the temporal filter sees
     filter_input = corrected_for_temporal if lookahead_map is not None else raw_dict
@@ -283,24 +312,31 @@ def process_image(bgr, detector, vs, draw=True, t_filter=None, dt=None, last_w=N
         # legacy non-temporal path (but still may have lookahead correction)
         if lookahead_map is not None:
             # use corrected_for_temporal directly to compute control without temporal EMA
-            # synthesize a feature from corrected values
-            # F_corrected = [X, Y, Theta] with X from corrected_bottom_x
-            F_corr = np.array([float(map_out["corrected_X"]), h/4.0, float(map_out["corrected_theta"])], dtype=float)
+            # synthesize a feature from corrected values (None when the map
+            # has no track and the detector has no line)
+            ci = corrected_for_temporal
+            if ci["has_line"]:
+                F_corr = np.array([float(ci["raw_X"]), h/4.0, float(ci["raw_theta"])], dtype=float)
+            else:
+                F_corr = None
             # synthesize P/Q from corrected
             # we can use map_out's corrected positions for drawing
-            P_c = np.array([float(map_out["corrected_bottom_x"]), float(h-1)], dtype=float)
-            # Q via theta
-            tan_t = math.tan(float(np.clip(map_out["corrected_theta"], -math.radians(45), math.radians(45))))
-            Q_c = np.array([float(map_out["corrected_bottom_x"] + h * tan_t), 0.0], dtype=float)
+            if F_corr is not None:
+                P_c = np.array([float(ci["raw_bottom_x"]), float(h-1)], dtype=float)
+                # Q via theta
+                tan_t = math.tan(float(np.clip(ci["raw_theta"], -math.radians(45), math.radians(45))))
+                Q_c = np.array([float(ci["raw_bottom_x"] + h * tan_t), 0.0], dtype=float)
+            else:
+                P_c = Q_c = None
             eff_conf = float(map_out["map_confidence"])
             v, w_ang, info = vs.compute_control(F_corr, dt=dt, confidence=eff_conf, smooth=True if lookahead_map is not None else False,
                                                  ff=ff_value)
             info = dict(info)
             info.update({
-                "filt_err_x": float(map_out["corrected_X"]),
-                "filt_err_theta_deg": float(math.degrees(map_out["corrected_theta"])),
-                "filt_width": float(map_out["corrected_width"]),
-                "filt_bottom_x": float(map_out["corrected_bottom_x"]),
+                "filt_err_x": float(ci["raw_X"]),
+                "filt_err_theta_deg": float(math.degrees(ci["raw_theta"])),
+                "filt_width": float(ci["raw_width"]),
+                "filt_bottom_x": float(ci["raw_bottom_x"]),
                 "confidence": float(eff_conf),
                 "map_status": map_out["map_status"],
                 "map_confidence": float(map_out["map_confidence"]),
@@ -361,6 +397,46 @@ def process_image(bgr, detector, vs, draw=True, t_filter=None, dt=None, last_w=N
             filt_out = None
             map_out = None
 
+    # --- track / observation semantics for consumers (info) ---
+    # has_observation: this frame's detector fitted a line to measured
+    #   two-sided evidence.
+    # has_track: a corridor track is available to steer on: a fresh
+    #   observation, a confident remembered map track, or a filter state
+    #   established from earlier observations (held through short gaps).
+    # has_line: kept for existing consumers; equals has_track.
+    has_observation = bool(raw_dict.get("has_observation", False))
+    if filt_out is not None and t_filter is not None and filt_out is not map_out:
+        has_track = bool(filt_out.get("track_established", False))
+    elif map_out is not None:
+        has_track = bool(map_out.get("track_valid", False) or raw_dict["has_line"])
+    else:
+        has_track = bool(raw_dict["has_line"])
+    if has_observation:
+        track_source = "observed"
+    elif has_track:
+        track_source = "predicted"
+    else:
+        track_source = "none"
+    # No corridor track has ever been established (cold start, or after a
+    # reset): command nothing rather than driving on the placeholder state.
+    # Travel through gaps on an ESTABLISHED track is unaffected because
+    # has_track stays True for a filter state descending from observations.
+    if not has_track:
+        v, w_ang = 0.0, 0.0
+        vs.reset_smoother()
+        info["v"] = 0.0
+        info["w"] = 0.0
+        info["no_track_stop"] = True
+    info["has_observation"] = has_observation
+    info["filter_input_observed"] = bool(filter_input.get("has_observation", False)) \
+        if filter_input is not None else has_observation
+    info["has_track"] = has_track
+    info["has_line"] = has_track
+    info["track_source"] = track_source
+    info["nav_source"] = res.get("nav_source", "observed" if raw_dict["has_line"] else "none")
+    if map_out is not None:
+        info["map_track_source"] = map_out.get("track_source", "")
+
     dt_ms = (time.perf_counter() - t0) * 1000.0
 
     overlay = None
@@ -380,21 +456,19 @@ def process_image(bgr, detector, vs, draw=True, t_filter=None, dt=None, last_w=N
             try:
                 # draw map bins as semi-transparent green rectangles for visible future
                 h_o, w_o = bgr.shape[:2]
-                cov = float(getattr(lookahead_map.params, "vertical_coverage", 0.75)) if lookahead_map is not None else 0.75
-                dh = (h_o * cov) / max(1, len(map_out.get("bins", [])) or 10)
-                for i, b in enumerate(map_out.get("bins", [])):
+                bins_o = map_out.get("bins", [])
+                # full-image boxes on the detector strip rows (crop offset added)
+                rects = lookahead_map.get_map_overlay((h_o, w_o), res=res, bins=bins_o)
+                ox_o = float(res.get("crop_offset", (0, 0))[0])
+                for i, b in enumerate(bins_o):
                     if b.confidence < 0.15:
                         continue
-                    # bin y: bottom strip mu=1 is at y = h - dh (bottom-anchored 3/4 coverage)
-                    y_top = int(max(0, h_o - (i+1)*dh))
-                    y_bot = int(y_top+dh)
-                    x_lo = int(max(0, b.center_x - b.width/2))
-                    x_hi = int(min(w_o, b.center_x + b.width/2))
+                    x_lo, x_hi, y_top, y_bot = rects[i]
                     # green dashed: thin outline
                     color = (0, 255, 0) if b.confidence > 0.4 else (0, 180, 0)
                     cv2.rectangle(overlay, (x_lo, y_top), (x_hi, y_bot), color, 1)
                     # center dot
-                    cv2.circle(overlay, (int(b.center_x), int((y_top+y_bot)/2)), 2, color, -1)
+                    cv2.circle(overlay, (int(b.center_x + ox_o), int((y_top+y_bot)/2)), 2, color, -1)
                 # mark predicted bottom
                 if "pred_bottom_x" in map_out:
                     px = int(map_out["pred_bottom_x"])
@@ -517,7 +591,9 @@ def run_folder(input_path, output_dir, detector, vs, show=False, use_temporal=Fa
             if bgr is None:
                 print(f"[WARN] cannot read {p}")
                 continue
-            out = process_image(bgr, detector, vs, draw=True, t_filter=local_filter, dt=None, last_w=last_w, lookahead_map=local_map)
+            # folder images carry no timestamps: use a nominal 20 Hz interval
+            # so sequence runs are reproducible (host time is not used)
+            out = process_image(bgr, detector, vs, draw=True, t_filter=local_filter, dt=0.05, last_w=last_w, lookahead_map=local_map)
             last_w = float(out["w"])
             from test_multi_roi import make_composite
             comp = make_composite(bgr, out["res"])
@@ -593,11 +669,18 @@ def run_video(input_path, output_dir, detector, vs, show=False, use_temporal=Tru
     # One continuous temporal+lookahead state for the whole video
     if use_temporal and t_filter is None:
         # create with image shape hint – will be corrected on first frame if needed
-        t_filter = TemporalNavigationFilter(TemporalFilterParams(image_width=vs.params.width, image_height=vs.params.height, n_strips=detector.n))
+        t_filter = TemporalNavigationFilter(TemporalFilterParams(
+            image_width=vs.params.width, image_height=vs.params.height,
+            n_strips=detector.n,
+            ignore_initial=int(getattr(detector, "ignore_initial", 0))))
     elif not use_temporal:
         t_filter = None
     if use_lookahead and lookahead_map is None:
-        lookahead_map = LookaheadCorridorMap(LookaheadParams(image_width=vs.params.width, image_height=vs.params.height, n_bins=detector.n))
+        lookahead_map = LookaheadCorridorMap(LookaheadParams(
+            image_width=vs.params.width, image_height=vs.params.height,
+            n_bins=detector.n,
+            ignore_initial=int(getattr(detector, "ignore_initial", 0)),
+            vertical_coverage=float(getattr(detector, "vertical_coverage", 0.75))))
     elif not use_lookahead:
         lookahead_map = None
 
@@ -610,12 +693,19 @@ def run_video(input_path, output_dir, detector, vs, show=False, use_temporal=Tru
                        "raw_err_x_px", "raw_err_theta_deg", "filt_err_x_px", "filt_err_theta_deg",
                        "confidence", "status", "innovation_x", "innovation_theta_deg",
                        "median_width", "filt_width", "n_two_sided", "has_line", "pending_count",
-                       "map_status", "map_conf", "map_innov_x", "map_innov_w", "support_old", "support_new", "shift_px"])
+                       "map_status", "map_conf", "map_innov_x", "map_innov_w", "support_old", "support_new", "shift_px",
+                       "dt_s", "has_observation", "has_track"])
 
         frame_idx = 0
         loop_count = 0
         last_time = time.perf_counter()
         last_w = 0.0
+        # Source time base: video files use their frame timestamps (or the
+        # nominal frame interval); live cameras use the arrival time. The
+        # host processing time is never used as the control interval.
+        src_fps = cap.get(cv2.CAP_PROP_FPS) or 0.0
+        nominal_dt = 1.0 / src_fps if 1.0 <= src_fps <= 240.0 else 0.05
+        last_pos_ms = None
         try:
             while True:
                 ret, bgr = cap.read()
@@ -640,6 +730,7 @@ def run_video(input_path, output_dir, detector, vs, show=False, use_temporal=Tru
                         vs.reset_smoother()
                         last_w = 0.0
                         last_time = time.perf_counter()
+                        last_pos_ms = None
                         ret, bgr = cap.read()
                         if not ret:
                             print("[LOOP] rewound but still no frame, stopping")
@@ -647,19 +738,27 @@ def run_video(input_path, output_dir, detector, vs, show=False, use_temporal=Tru
                     else:
                         break
                 now = time.perf_counter()
-                dt = now - last_time
+                if is_camera:
+                    dt = now - last_time if frame_idx > 0 else nominal_dt
+                else:
+                    pos_ms = cap.get(cv2.CAP_PROP_POS_MSEC)
+                    if last_pos_ms is not None and pos_ms is not None \
+                            and math.isfinite(pos_ms) and pos_ms > last_pos_ms:
+                        dt = (pos_ms - last_pos_ms) / 1000.0
+                    else:
+                        dt = nominal_dt
+                    last_pos_ms = pos_ms if (pos_ms is not None and math.isfinite(pos_ms)) else None
                 dt = max(1e-3, min(0.5, dt))
                 last_time = now
 
-                # update filter/map image size on first frame if mismatch
-                if t_filter is not None and frame_idx == 0:
+                # filter/map geometry follows the frame (process_image and
+                # the map's update()); warn once if an explicit controller
+                # normalization differs from the frame size
+                if frame_idx == 0 and not getattr(vs.params, "geometry_from_frame", False):
                     h, w = bgr.shape[:2]
-                    t_filter.params.image_width = w
-                    t_filter.params.image_height = h
-                if lookahead_map is not None and frame_idx == 0:
-                    h, w = bgr.shape[:2]
-                    lookahead_map.params.image_width = w
-                    lookahead_map.params.image_height = h
+                    if (vs.params.width, vs.params.height) != (w, h):
+                        print(f"[WARN] controller normalization {vs.params.width}x{vs.params.height} "
+                              f"differs from frame {w}x{h} (explicit --width/--height)")
 
                 out = process_image(bgr, detector, vs, draw=True, t_filter=t_filter, dt=dt, last_w=last_w, lookahead_map=lookahead_map)
                 last_w = float(out["w"])
@@ -675,7 +774,9 @@ def run_video(input_path, output_dir, detector, vs, show=False, use_temporal=Tru
                                int(info.get("pending_count",0)),
                                info.get("map_status",""), f"{info.get('map_confidence',0):.2f}",
                                f"{info.get('raw_map_innovation_x',0):.1f}", f"{info.get('raw_map_innovation_width',0):.1f}",
-                               int(info.get("spatial_old",0)), int(info.get("spatial_new",0)), f"{info.get('map_shift_px',0):.1f}"])
+                               int(info.get("spatial_old",0)), int(info.get("spatial_new",0)), f"{info.get('map_shift_px',0):.1f}",
+                               f"{dt:.4f}", int(bool(info.get("has_observation", False))),
+                               int(bool(info.get("has_track", False)))])
                 from test_multi_roi import make_composite
                 comp = make_composite(bgr, out["res"])
                 if composite_only or out["overlay"] is None:
@@ -728,8 +829,8 @@ def main():
     parser.add_argument("--show", action="store_true", help="Show live preview")
     parser.add_argument("--loop", action="store_true", help="Loop video forever until stopped (q / Ctrl-C); only for --video files, camera already loops")
     parser.add_argument("--line", action="store_true", help="Use straight line instead of smoothing spline (default is smoothing spline / curvilinear fit)")
-    parser.add_argument("--width", type=int, default=640, help="Expected image width for normalization")
-    parser.add_argument("--height", type=int, default=480, help="Expected height")
+    parser.add_argument("--width", type=int, default=None, help="Image width for controller normalization (default: the actual frame width)")
+    parser.add_argument("--height", type=int, default=None, help="Image height for controller normalization (default: the actual frame height)")
     parser.add_argument("--vf", type=float, default=0.20, help="Forward speed m/s")
     parser.add_argument("--wmax", type=float, default=0.50, help="Max angular rad/s")
     parser.add_argument("--lambdax", type=float, default=10.0, help="Lateral gain")
@@ -754,7 +855,7 @@ def main():
     # --- lookahead / visible-future map flags ---
     parser.add_argument("--lookahead", action="store_true", help="Enable lookahead corridor map for folder mode (video enables by default)")
     parser.add_argument("--no-lookahead", action="store_true", help="Disable lookahead corridor map (even for video)")
-    parser.add_argument("--lookahead-bins", type=int, default=10, help="Number of vertical bins for lookahead map (default 10 = strips)")
+    parser.add_argument("--lookahead-bins", type=int, default=None, help="Number of vertical bins for lookahead map; must equal --n_strips (default: --n_strips)")
     parser.add_argument("--lookahead-shift-px", type=float, default=14.0, help="Forward motion pixels per frame for map shift (default 14)")
     parser.add_argument("--lookahead-center-gate", type=float, default=0.35, help="Max center gate as fraction of width for map consistency (default 0.35)")
     parser.add_argument("--lookahead-width-gate", type=float, default=0.35, help="Max width gate fraction for map consistency (default 0.35)")
@@ -767,17 +868,25 @@ def main():
     parser.add_argument("--vertical-coverage", type=float, default=0.75, help="Vertical fraction of image covered by ROIs from bottom (0.75 = bottom 3/4, top 1/4 has no boxes; default 0.75 per request)")
     parser.add_argument("--roi-draw-frac", type=float, default=1.0, help="Height fraction of each white ROI box relative to strip height (1.0 = full strip, 0.75 = 3/4 height centered; default 1.0)")
     args = parser.parse_args()
+    if args.lookahead_bins is None:
+        args.lookahead_bins = args.n_strips
+    elif args.lookahead_bins != args.n_strips:
+        parser.error(f"--lookahead-bins ({args.lookahead_bins}) must equal --n_strips "
+                     f"({args.n_strips}): map bins correspond one-to-one to detector strips")
 
     # Detector with default robust params (from test_multi_roi.py).
     # morph="struct" is the documented default (README, result_02): Eq. (3)
     # opening + embedded band-support weed removal before any corridor.
     # --line = straight line only, default = smoothing spline (nav_curve=True)
-    detector = MultiROIDetector(n_strips=args.n_strips, l_frac=args.l_frac, index=args.index,
-                                morph="struct",
-                                nav_curve=(not args.line),
-                                ignore_initial=args.ignore_initial,
-                                vertical_coverage=args.vertical_coverage,
-                                roi_draw_frac=args.roi_draw_frac)
+    try:
+        detector = MultiROIDetector(n_strips=args.n_strips, l_frac=args.l_frac, index=args.index,
+                                    morph="struct",
+                                    nav_curve=(not args.line),
+                                    ignore_initial=args.ignore_initial,
+                                    vertical_coverage=args.vertical_coverage,
+                                    roi_draw_frac=args.roi_draw_frac)
+    except ValueError as e:
+        parser.error(str(e))
     if args.line:
         print("[LINE] straight-line mode enabled (smoothing spline disabled)")
     else:
@@ -785,7 +894,8 @@ def main():
 
     # Visual servoing params
     vs_params = MRVSParams(
-        width=args.width, height=args.height,
+        width=args.width or 640, height=args.height or 480,
+        geometry_from_frame=(args.width is None and args.height is None),
         vf_des=args.vf, w_max=args.wmax,
         lambda_x=args.lambdax, lambda_theta=args.lambdatheta,
         w_alpha=args.w_alpha, max_w_rate=args.max_w_rate, w_deadband=args.w_deadband,
@@ -806,7 +916,7 @@ def main():
 
     if use_temporal:
         t_params = TemporalFilterParams(
-            image_width=args.width, image_height=args.height,
+            image_width=vs_params.width, image_height=vs_params.height,
             max_bottom_jump_frac=args.max_jump_frac,
             max_bottom_jump_width_frac=args.max_jump_width_frac,
             max_heading_jump_deg=args.max_heading_jump,
@@ -815,6 +925,7 @@ def main():
             spike_confirm_frames=args.spike_confirm_frames,
             alpha_x=args.alpha_x, alpha_theta=args.alpha_theta,
             n_strips=args.n_strips,
+            ignore_initial=args.ignore_initial,
         )
         t_filter = TemporalNavigationFilter(t_params)
 
@@ -830,7 +941,7 @@ def main():
 
     if use_lookahead:
         l_params = LookaheadParams(
-            image_width=args.width, image_height=args.height,
+            image_width=vs_params.width, image_height=vs_params.height,
             n_bins=args.lookahead_bins,
             shift_px=args.lookahead_shift_px,
             max_center_gate_frac=args.lookahead_center_gate,

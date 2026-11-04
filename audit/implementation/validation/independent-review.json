@@ -1,0 +1,24 @@
+{
+  "date": "2026-11-04",
+  "command": "env -u PYTHONPATH -u PYTHONHOME python3 -m pytest -q",
+  "result": "108 passed, 4 warnings in 8.81s",
+  "python": "3.10.12",
+  "pytest": "6.2.5",
+  "warning_scope": "Local pytest predates the declared dev dependency range and reports pythonpath plus pkg_resources warnings. All tests executed.",
+  "checks": [
+    "Independent published steering acceleration at 100 and 200 Hz",
+    "No movement before initial track acquisition",
+    "Map predictions do not count as fresh filter evidence",
+    "Full inherited and implementation regression suite"
+  ],
+  "runtime_sha256": {
+    "test_multi_roi.py": "5cad00c968d3ebbea323804f5645e79758601758c911a0111be9d1637215d774",
+    "mr_vs.py": "6e846b6491e03ca97a9246d2630e34b96350a67395671e6585a8734d516eedfe",
+    "temporal_filter.py": "935ce5ad09ef75dfdc6cfce7ec2afc72975eef59003f80137cd77ec4afed80d6",
+    "lookahead_corridor_map.py": "5acb2bafc2607849c0271d4e4c1adaa612980898f057a8d199395c3ab1fe7bc5",
+    "run_mr_navigation.py": "f11f7be747304749b5803688f87170106e84ab5a05fca0452023d1d3a00fc712",
+    "mr_navigation_stack.py": "db7b12b3a8a8c463c9b62d62a103f937083afec41e1fc2e69432e5f9b29d5c91",
+    "tests/sim_ros2/src/mrsim/mrsim/pipeline.py": "d66238f341344ed9c1b7633f50c0a9d45b284181acb91b43a04db440e38285cd",
+    "tests/sim_ros2/src/mrsim/mrsim/nav_node.py": "36ff816ae7e47eba9b0420393bc21531022825874282b55136403762354e8db5"
+  }
+}

@@ -279,6 +279,22 @@ class MultiROIDetector:
         # corridors are visible, cf. photo_6); 0.4 keeps the driven furrow
         # for a centered spawn while upper strips still roam freely.
         self.init_window_frac = float(min(1.0, max(0.1, init_window_frac)))
+        # Configuration validation: the navigation fit needs at least two
+        # strips that are neither ignored nor the excluded strip 1. Smaller
+        # settings cannot produce an observed line (n_strips=1 previously
+        # crashed with an unassigned nav_line).
+        if int(self.n) != self.n or self.n < 2:
+            raise ValueError(f"n_strips must be an integer >= 2, got {n_strips}")
+        first_used = max(self.ignore_initial, 0 if self.nav_include_first else 1)
+        if self.ignore_initial < 0 or self.n - first_used < 2:
+            raise ValueError(
+                f"n_strips={self.n} with ignore_initial={self.ignore_initial} "
+                f"leaves fewer than two strips for the navigation fit")
+
+    @property
+    def n_evidence_strips(self):
+        """Maximum number of strips that can count as two-sided evidence."""
+        return int(self.n - self.ignore_initial)
 
     def detect(self, bgr, lookahead_prior=None):
         """Run the full pipeline on one BGR image; returns results dict.
@@ -369,6 +385,7 @@ class MultiROIDetector:
             x_lo = int(max(0, round(w / 2.0 - w * iwf / 2.0)))
             x_hi = int(min(w, round(w / 2.0 + w * iwf / 2.0)))
         # --- lookahead prior seeding: keep boxes/midpoints steady through gaps ---
+        prior_seeded = False
         if lookahead_prior is not None:
             try:
                 pred_bins = None
@@ -402,6 +419,7 @@ class MultiROIDetector:
                         if 4 <= (nx_hi - nx_lo) <= w:
                             x_lo, x_hi = nx_lo, nx_hi
                         mo_x = pc
+                        prior_seeded = True
             except Exception:
                 pass
 
@@ -544,7 +562,10 @@ class MultiROIDetector:
                     flank_tried += 1
             # else / one-sided: previous ROI window & Mx reused
 
-            my = h - mu * dh                 # Eq. (10): My(mu) = My(mu-1) - dh
+            # Eq. (10): My(mu) = My(mu-1) - dh. The midpoint is placed at the
+            # centre row of the strip whose rows produced the projection, the
+            # same row used by the detection chains and the strip profile.
+            my = y1 + dh / 2.0
             # ROI visualization height fraction (3/4 → boxes 3/4 of strip height, centered)
             box_h = int(round(dh * float(getattr(self, "roi_draw_frac", 1.0))))
             if box_h != dh:
@@ -592,8 +613,11 @@ class MultiROIDetector:
         nav_pts, q_rejected = [], []
         # measured set respects ignore_initial so median is not biased by noisy bottom
         measured = [(x, y, d) for i, (x, y, d) in enumerate(q_feed) if d is not None and i >= self.ignore_initial]
+        # two-sided evidence count: ignored strips never count as evidence
+        n_two = len(measured)
         if not measured:
-            # fallback to all if ignoring leaves nothing (e.g. approach phase)
+            # median-width fallback only: ignored strips may still describe
+            # the corridor width, but they are not counted as evidence
             measured = [(x, y, d) for x, y, d in q_feed if d is not None]
         if measured:
             med_d = float(np.median([d for _, _, d in measured]))
@@ -612,12 +636,21 @@ class MultiROIDetector:
                 q_rejected.append((x, y))
         fallback = len(nav_pts) < 2
         if fallback:
-            # fallback still respects ignore_initial; if still not enough, use center
-            nav_pts = [q[i] for i in range(len(q)) if i >= self.ignore_initial]
-            if len(nav_pts) < 2:
-                nav_pts = list(q)
-            q_rejected = [q[i] for i in range(len(q)) if q[i] not in nav_pts]
+            # Fewer than two measured midpoints: the remaining Q points are
+            # inherited from the lookahead seed or the initial image centre,
+            # not observed. Fitting them would report a fabricated line as a
+            # measurement, so no navigation line is returned. Consumers hold
+            # their established track (temporal filter / lookahead map).
+            nav_pts = []
+            q_rejected = list(q)
+        if not fallback:
+            nav_source = "observed"
+        elif prior_seeded:
+            nav_source = "prior"
+        else:
+            nav_source = "none"
 
+        nav_line = None
         q_accepted = []
         if len(nav_pts) >= 2:
             nav_line, acc_rel, _ = self._fit_line_tls(nav_pts)
@@ -701,9 +734,8 @@ class MultiROIDetector:
         median_w = float(np.median([d for _, _, d in measured])) if measured else 0.0
         # bottom width: width from lowest two-sided strip if available else median
         bottom_w = float(feed_d[0][1]) if feed_d else median_w
-        n_two = len(measured)
-        # estimate raw bottom x from lowest accepted q (or raw q[0] fallback)
-        raw_bottom_x = float(q_accepted[0][0]) if q_accepted else (float(q[0][0]) if q else w/2.0)
+        # estimate raw bottom x from lowest accepted q (nan without observation)
+        raw_bottom_x = float(q_accepted[0][0]) if q_accepted else float("nan")
 
         # --- per-strip profile for lookahead map (causal, lightweight) ---
         q_accepted_set = set((float(x), float(y)) for x, y in q_accepted)
@@ -730,7 +762,7 @@ class MultiROIDetector:
             accepted_nav = False
             if q_accepted:
                 for ax, ay in q_accepted:
-                    if abs(ax - center_x) < 1e-6 and abs(ay - (h - mu * dh)) < 1e-6:
+                    if abs(ax - center_x) < 1e-6 and abs(ay - y_center) < 1e-6:
                         accepted_nav = True
                         break
             strip_profile.append({
@@ -769,6 +801,15 @@ class MultiROIDetector:
             "n_q_rejected": len(q_rejected),
             "raw_bottom_x": raw_bottom_x,
             "n_strips": self.n,
+            # --- evidence provenance ---
+            # nav_source: "observed" (fit to measured two-sided midpoints),
+            # "prior" (no observed line; Q inherited from the lookahead seed)
+            # or "none" (no observed line and no prior)
+            "nav_source": nav_source,
+            "nav_observed": bool(nav_source == "observed"),
+            "prior_seeded": bool(prior_seeded),
+            "n_evidence_strips": int(self.n - self.ignore_initial),
+            "strip_height": int(dh),
             # --- lookahead spatial diagnostics ---
             "strip_profile": strip_profile,
             "q_feed": q_feed,
@@ -804,45 +845,54 @@ class MultiROIDetector:
         ys = np.array(vy, dtype=np.float64)   # image rows (increasing)
         xs = np.array(vx, dtype=np.float64)   # lateral positions
 
-        def spline_at(yy):
-            n_int = max(0, min(3, (len(ys) - 3) // 2))
-            t = np.linspace(ys[0], ys[-1], n_int + 2)[1:-1] if n_int else \
+        def fit_subset(idx):
+            """Cubic regression spline through the rows in idx (sorted)."""
+            yk, xk = ys[idx], xs[idx]
+            n_int = max(0, min(3, (len(yk) - 3) // 2))
+            t = np.linspace(yk[0], yk[-1], n_int + 2)[1:-1] if n_int else \
                 np.array([])
-            sp = LSQUnivariateSpline(ys, xs, t, k=3)
-            return sp(yy)
+            return LSQUnivariateSpline(yk, xk, t, k=3)
 
-        # robust refit: drop worst residuals vs the curve (max 2 rounds)
+        # robust refit: drop worst residuals vs the curve (max 2 rounds),
+        # refitting on the retained subset each round so a rejected
+        # midpoint no longer shapes the curve or its base tangent
         keep = list(range(len(ys)))
+        sp = fit_subset(keep)
         for _ in range(2):
             if len(keep) <= 4:
                 break
-            vals = np.array([float(spline_at(ys[i])) for i in keep])
-            res = np.abs(np.array([xs[i] for i in keep]) - vals)
+            vals = sp(ys[keep])
+            res = np.abs(xs[keep] - vals)
             worst = int(np.argmax(res))
             if res[worst] <= 2.5 * max(float(res.std()), 1e-6):
                 break
             keep.pop(worst)
+            sp = fit_subset(keep)
+        y0, y1 = float(ys[keep[0]]), float(ys[keep[-1]])
+
+        def spline_at(yy):
+            return sp(yy)
 
         yy = np.arange(0, img_h, 4, dtype=np.float64)
-        sx = spline_at(np.clip(yy, ys[0], ys[-1]))
-        # linear extension beyond the data range along end tangents
-        step = max(1.0, (ys[-1] - ys[0]) / 20.0)
-        m_lo = (float(spline_at(ys[0] + step)) - float(spline_at(ys[0]))) / step
-        m_hi = (float(spline_at(ys[-1])) - float(spline_at(ys[-1] - step))) / step
+        sx = spline_at(np.clip(yy, y0, y1))
+        # linear extension beyond the retained data range along end tangents
+        step = max(1.0, (y1 - y0) / 20.0)
+        m_lo = (float(spline_at(y0 + step)) - float(spline_at(y0))) / step
+        m_hi = (float(spline_at(y1)) - float(spline_at(y1 - step))) / step
         # boundary splines can wiggle; cap extension slope for drawing
         m_lo = float(np.clip(m_lo, -6.0, 6.0))
         m_hi = float(np.clip(m_hi, -6.0, 6.0))
         for i, yv in enumerate(yy):
-            if yv < ys[0]:
-                sx[i] += m_lo * (yv - ys[0])
-            elif yv > ys[-1]:
-                sx[i] += m_hi * (yv - ys[-1])
+            if yv < y0:
+                sx[i] += m_lo * (yv - y0)
+            elif yv > y1:
+                sx[i] += m_hi * (yv - y1)
 
-        # safety envelope vs the straight TLS reference line.
-        # Evaluate the reference geometrically as x(y) = (y - b)/w: this
-        # is numerically stable even for the near-vertical w=1e6
-        # representation, where naive w*y + b overflows to ~1e8 and would
-        # snap the clamped curve onto an exploding line.
+        # safety envelope vs the straight TLS reference line through the
+        # retained subset. Evaluate the reference geometrically as
+        # x(y) = (y - b)/w: this is numerically stable even for the
+        # near-vertical w=1e6 representation, where naive w*y + b overflows
+        # to ~1e8 and would snap the clamped curve onto an exploding line.
         ref = self._fit_line_tls([(x, y) for x, y in zip(xs[keep], ys[keep])])
         w_r, b_r = ref[0]
         ref_x = (yy - b_r) / w_r
@@ -852,10 +902,10 @@ class MultiROIDetector:
             sx = ref_x + (sx - ref_x) * f
 
         samples = [(float(x), float(y)) for x, y in zip(sx, yy)]
-        # steering-relevant tangent: derivative at the LAST MEASURED row
+        # steering-relevant tangent: derivative at the LAST RETAINED row
         # (deepest evidence), not in the extrapolated tail
-        dxdy = (float(spline_at(ys[-1] + 1e-3))
-                - float(spline_at(ys[-1] - 1e-3))) / 2e-3
+        dxdy = (float(spline_at(y1 + 1e-3))
+                - float(spline_at(y1 - 1e-3))) / 2e-3
         dxdy = float(np.clip(dxdy, -6.0, 6.0))
         base_ang = math.degrees(math.atan(abs(dxdy)))
         return samples, base_ang
@@ -915,7 +965,10 @@ class MultiROIDetector:
             rejects += 1
         dx, dy = float(d[0]), float(d[1])
         if abs(dx) < 1e-9:                   # vertical corridor
-            w_out, b_out = 1e6 * (1.0 if dy >= 0 else -1.0), -1e6 * c[0]
+            # x = c[0] in y = w*x + b form requires b = -w*c[0] for either
+            # slope sign (the SVD direction sign is arbitrary)
+            w_out = 1e6 * (1.0 if dy >= 0 else -1.0)
+            b_out = -w_out * c[0]
         else:
             w_out = dy / dx
             b_out = c[1] - w_out * c[0]
@@ -1055,7 +1108,8 @@ def pre_corridor_clean(binary, n_strips=10, l_frac=0.05, pad_px=6,
         bands[mu] = cluster_feature_columns(z, 0, l_thresh)
 
     def strip_of(y):
-        return min(n_strips, max(1, (h - int(y)) // max(1, dh)))
+        # strip mu covers rows [h - mu*dh, h - (mu-1)*dh)
+        return min(n_strips, max(1, (h - int(y) - 1) // max(1, dh) + 1))
 
     n_cc, labels, stats, centroids = cv2.connectedComponentsWithStats(
         binary.astype(np.uint8), connectivity=8)
@@ -1563,14 +1617,17 @@ def main():
     os.makedirs(args.results_dir, exist_ok=True)
     csv_path = os.path.join(args.results_dir, "detection_data.csv")
 
-    detector = MultiROIDetector(n_strips=args.n_strips, l_frac=args.l_frac,
-                                border_frac=args.border_frac, index=args.index,
-                                min_flank_frac=args.min_flank_frac,
-                                nav_include_first=args.nav_include_first,
-                                morph=args.morph, open_len=args.open_len,
-                                fence_k=args.fence_k,
-                                morph_fence=args.morph_fence,
-                                nav_curve=args.nav_curve)
+    try:
+        detector = MultiROIDetector(n_strips=args.n_strips, l_frac=args.l_frac,
+                                    border_frac=args.border_frac, index=args.index,
+                                    min_flank_frac=args.min_flank_frac,
+                                    nav_include_first=args.nav_include_first,
+                                    morph=args.morph, open_len=args.open_len,
+                                    fence_k=args.fence_k,
+                                    morph_fence=args.morph_fence,
+                                    nav_curve=args.nav_curve)
+    except ValueError as e:
+        parser.error(str(e))
     rotate_prefixes = tuple(p.strip() for p in args.rotate_names.split(",")
                             if p.strip())
     rot_map = {90: cv2.ROTATE_90_CLOCKWISE,
@@ -1666,8 +1723,6 @@ def main():
                     f"{info.get('removed_frac', 0.0):.4f}",
                     f"{total_ms:.1f}"])
             times.append(total_ms)
-            if info.get("applied"):
-                deltas.append(abs(ang_f - ang1))
             if info.get("applied"):
                 deltas.append(abs(ang_f - ang1))
             scrub = (f"scrub removed {info['n_removed']}"

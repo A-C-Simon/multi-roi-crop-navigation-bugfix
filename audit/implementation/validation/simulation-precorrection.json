@@ -1,0 +1,460 @@
+{
+ "label": "PRE-CORRECTION: Gazebo runs made before the independent-review corrections (no-track gate, published-rate limit, map-hold provenance) and before held-yaw rotation. Kept for comparison; see simulation-postcorrection.json.",
+ "environment": {
+  "ROS_DOMAIN_ID": 87,
+  "GAZEBO_MASTER_URI": "http://localhost:11387",
+  "ros": "humble",
+  "simulator": "gzserver 11 headless"
+ },
+ "raw_logs": "/tmp/mr_sim/runs_precorrection/<run>/{nav_run.csv,launch.log} (not committed)",
+ "runs": {
+  "curve_map": {
+   "run": "curve_map",
+   "world": "farm_curve.world",
+   "frames": 1776,
+   "sim_seconds": 109.1,
+   "x_start": -8.0,
+   "x_end": 9.0,
+   "cross_track_m": {
+    "mean_abs": 0.0817,
+    "rms": 0.0979,
+    "max_abs": 0.2174,
+    "final": 0.0262
+   },
+   "in_row_x_le_7_cross_track_m": {
+    "mean_abs": 0.0857,
+    "max_abs": 0.2174
+   },
+   "row_end_x_gt_7_held_frames": 193,
+   "w_radps": {
+    "mean_abs": 0.0463,
+    "max_abs": 0.258
+   },
+   "steer_accel_radps2": {
+    "p95": 0.364,
+    "max": 1.269
+   },
+   "dt_s": {
+    "median": 0.05
+   },
+   "status_counts": {
+    "accepted": 1453,
+    "held_no_line": 193,
+    "pending": 130
+   },
+   "track_source_counts": {
+    "observed": 1550,
+    "predicted": 226
+   },
+   "map_status_counts": {
+    "held_no_line": 11,
+    "map_accept": 1494,
+    "map_hold": 49,
+    "map_pending": 32,
+    "map_switch": 5,
+    "no_map": 183,
+    "occlusion_hold": 2
+   },
+   "has_obs_fraction": 0.873,
+   "n_two_median": 10.0,
+   "stop_reasons": [
+    "reached end of lane (x=9.00)"
+   ],
+   "launch_tail": "launch_exit=0 wall_s=118"
+  },
+  "curve_nomap": {
+   "run": "curve_nomap",
+   "world": "farm_curve.world",
+   "frames": 1780,
+   "sim_seconds": 110.0,
+   "x_start": -8.0,
+   "x_end": 8.42,
+   "cross_track_m": {
+    "mean_abs": 0.0655,
+    "rms": 0.0788,
+    "max_abs": 0.1801,
+    "final": -0.1176
+   },
+   "in_row_x_le_7_cross_track_m": {
+    "mean_abs": 0.0644,
+    "max_abs": 0.1801
+   },
+   "row_end_x_gt_7_held_frames": 110,
+   "w_radps": {
+    "mean_abs": 0.0591,
+    "max_abs": 0.257
+   },
+   "steer_accel_radps2": {
+    "p95": 0.58,
+    "max": 1.308
+   },
+   "dt_s": {
+    "median": 0.05
+   },
+   "status_counts": {
+    "accepted": 1047,
+    "held_no_line": 110,
+    "pending": 614,
+    "pending_accepted": 9
+   },
+   "track_source_counts": {
+    "observed": 1670,
+    "predicted": 110
+   },
+   "map_status_counts": {
+    "": 1780
+   },
+   "has_obs_fraction": 0.938,
+   "n_two_median": 10.0,
+   "stop_reasons": [
+    "reached max_seconds=110.0"
+   ],
+   "launch_tail": "launch_exit=0 wall_s=120"
+  },
+  "failure_stop": {
+   "run": "failure_stop",
+   "world": "farm_straight.world",
+   "frames": 806,
+   "sim_seconds": 45.0,
+   "x_start": -8.0,
+   "x_end": -0.63,
+   "cross_track_m": {
+    "mean_abs": 0.0098,
+    "rms": 0.0125,
+    "max_abs": 0.0344,
+    "final": 0.0143
+   },
+   "in_row_x_le_7_cross_track_m": {
+    "mean_abs": 0.0098,
+    "max_abs": 0.0344
+   },
+   "row_end_x_gt_7_held_frames": 0,
+   "w_radps": {
+    "mean_abs": 0.024,
+    "max_abs": 0.116
+   },
+   "steer_accel_radps2": {
+    "p95": 0.523,
+    "max": 0.8
+   },
+   "dt_s": {
+    "median": 0.05
+   },
+   "status_counts": {
+    "accepted": 706,
+    "pending": 51,
+    "perception_error": 49
+   },
+   "track_source_counts": {
+    "none": 49,
+    "observed": 757
+   },
+   "map_status_counts": {
+    "": 806
+   },
+   "has_obs_fraction": 0.939,
+   "n_two_median": 10.0,
+   "stop_reasons": [
+    "reached max_seconds=45.0"
+   ],
+   "launch_tail": "launch_exit=0 wall_s=60"
+  },
+  "gaps_map": {
+   "run": "gaps_map",
+   "world": "farm_straight_gaps.world",
+   "frames": 1584,
+   "sim_seconds": 110.1,
+   "x_start": -8.0,
+   "x_end": 8.16,
+   "cross_track_m": {
+    "mean_abs": 0.011,
+    "rms": 0.0144,
+    "max_abs": 0.0377,
+    "final": -0.0359
+   },
+   "in_row_x_le_7_cross_track_m": {
+    "mean_abs": 0.0106,
+    "max_abs": 0.0377
+   },
+   "row_end_x_gt_7_held_frames": 41,
+   "w_radps": {
+    "mean_abs": 0.0093,
+    "max_abs": 0.077
+   },
+   "steer_accel_radps2": {
+    "p95": 0.16,
+    "max": 0.625
+   },
+   "dt_s": {
+    "median": 0.05
+   },
+   "status_counts": {
+    "accepted": 1270,
+    "held": 12,
+    "held_no_line": 29,
+    "pending": 273
+   },
+   "track_source_counts": {
+    "observed": 1522,
+    "predicted": 62
+   },
+   "map_status_counts": {
+    "held_no_line": 7,
+    "map_accept": 1010,
+    "map_hold": 220,
+    "map_pending": 169,
+    "map_switch": 33,
+    "no_map": 23,
+    "occlusion_hold": 122
+   },
+   "has_obs_fraction": 0.961,
+   "n_two_median": 7.0,
+   "stop_reasons": [
+    "reached max_seconds=110.0"
+   ],
+   "launch_tail": "launch_exit=0 wall_s=121",
+   "gap_windows": {
+    "left_gap[-3,-1.5]": {
+     "max_abs_ct_m": 0.0344,
+     "max_abs_w": 0.053,
+     "obs_fraction": 1.0
+    },
+    "right_gap[1,2.5]": {
+     "max_abs_ct_m": 0.0233,
+     "max_abs_w": 0.05,
+     "obs_fraction": 0.979
+    },
+    "full_gap[4.5,5.3]": {
+     "max_abs_ct_m": 0.0377,
+     "max_abs_w": 0.054,
+     "obs_fraction": 1.0
+    }
+   }
+  },
+  "gaps_nomap": {
+   "run": "gaps_nomap",
+   "world": "farm_straight_gaps.world",
+   "frames": 1805,
+   "sim_seconds": 110.0,
+   "x_start": -8.0,
+   "x_end": 8.33,
+   "cross_track_m": {
+    "mean_abs": 0.0472,
+    "rms": 0.1186,
+    "max_abs": 0.7353,
+    "final": 0.7353
+   },
+   "in_row_x_le_7_cross_track_m": {
+    "mean_abs": 0.0193,
+    "max_abs": 0.0686
+   },
+   "row_end_x_gt_7_held_frames": 191,
+   "w_radps": {
+    "mean_abs": 0.0612,
+    "max_abs": 0.261
+   },
+   "steer_accel_radps2": {
+    "p95": 0.506,
+    "max": 1.0
+   },
+   "dt_s": {
+    "median": 0.05
+   },
+   "status_counts": {
+    "accepted": 1309,
+    "held_no_line": 191,
+    "pending": 301,
+    "pending_accepted": 4
+   },
+   "track_source_counts": {
+    "observed": 1614,
+    "predicted": 191
+   },
+   "map_status_counts": {
+    "": 1805
+   },
+   "has_obs_fraction": 0.894,
+   "n_two_median": 9.0,
+   "stop_reasons": [
+    "reached max_seconds=110.0"
+   ],
+   "launch_tail": "launch_exit=0 wall_s=118",
+   "gap_windows": {
+    "left_gap[-3,-1.5]": {
+     "max_abs_ct_m": 0.0355,
+     "max_abs_w": 0.181,
+     "obs_fraction": 1.0
+    },
+    "right_gap[1,2.5]": {
+     "max_abs_ct_m": 0.0423,
+     "max_abs_w": 0.112,
+     "obs_fraction": 1.0
+    },
+    "full_gap[4.5,5.3]": {
+     "max_abs_ct_m": 0.0686,
+     "max_abs_w": 0.149,
+     "obs_fraction": 1.0
+    }
+   }
+  },
+  "line_straight": {
+   "run": "line_straight",
+   "world": "farm_straight.world",
+   "frames": 1726,
+   "sim_seconds": 104.6,
+   "x_start": -8.0,
+   "x_end": 9.01,
+   "cross_track_m": {
+    "mean_abs": 0.0125,
+    "rms": 0.0174,
+    "max_abs": 0.0602,
+    "final": -0.0602
+   },
+   "in_row_x_le_7_cross_track_m": {
+    "mean_abs": 0.0103,
+    "max_abs": 0.0347
+   },
+   "row_end_x_gt_7_held_frames": 209,
+   "w_radps": {
+    "mean_abs": 0.0079,
+    "max_abs": 0.097
+   },
+   "steer_accel_radps2": {
+    "p95": 0.06,
+    "max": 0.625
+   },
+   "dt_s": {
+    "median": 0.05
+   },
+   "status_counts": {
+    "accepted": 1468,
+    "held_no_line": 209,
+    "pending": 49
+   },
+   "track_source_counts": {
+    "observed": 1517,
+    "predicted": 209
+   },
+   "map_status_counts": {
+    "": 1726
+   },
+   "has_obs_fraction": 0.879,
+   "n_two_median": 10.0,
+   "stop_reasons": [
+    "reached end of lane (x=9.01)"
+   ],
+   "launch_tail": "launch_exit=0 wall_s=115"
+  },
+  "straight_map": {
+   "run": "straight_map",
+   "world": "farm_straight.world",
+   "frames": 1750,
+   "sim_seconds": 104.6,
+   "x_start": -8.0,
+   "x_end": 9.01,
+   "cross_track_m": {
+    "mean_abs": 0.0192,
+    "rms": 0.026,
+    "max_abs": 0.0822,
+    "final": -0.0822
+   },
+   "in_row_x_le_7_cross_track_m": {
+    "mean_abs": 0.0157,
+    "max_abs": 0.0435
+   },
+   "row_end_x_gt_7_held_frames": 202,
+   "w_radps": {
+    "mean_abs": 0.0074,
+    "max_abs": 0.12
+   },
+   "steer_accel_radps2": {
+    "p95": 0.206,
+    "max": 0.76
+   },
+   "dt_s": {
+    "median": 0.05
+   },
+   "status_counts": {
+    "accepted": 1484,
+    "held": 13,
+    "held_no_line": 189,
+    "pending": 64
+   },
+   "track_source_counts": {
+    "observed": 1531,
+    "predicted": 219
+   },
+   "map_status_counts": {
+    "held_no_line": 6,
+    "map_accept": 1559,
+    "no_map": 184,
+    "occlusion_hold": 1
+   },
+   "has_obs_fraction": 0.875,
+   "n_two_median": 10.0,
+   "stop_reasons": [
+    "reached end of lane (x=9.01)"
+   ],
+   "launch_tail": "launch_exit=0 wall_s=115"
+  },
+  "straight_nomap": {
+   "run": "straight_nomap",
+   "world": "farm_straight.world",
+   "frames": 1752,
+   "sim_seconds": 107.55,
+   "x_start": -8.0,
+   "x_end": 9.0,
+   "cross_track_m": {
+    "mean_abs": 0.0317,
+    "rms": 0.054,
+    "max_abs": 0.2222,
+    "final": -0.2222
+   },
+   "in_row_x_le_7_cross_track_m": {
+    "mean_abs": 0.0159,
+    "max_abs": 0.0537
+   },
+   "row_end_x_gt_7_held_frames": 210,
+   "w_radps": {
+    "mean_abs": 0.0306,
+    "max_abs": 0.187
+   },
+   "steer_accel_radps2": {
+    "p95": 0.48,
+    "max": 0.98
+   },
+   "dt_s": {
+    "median": 0.05
+   },
+   "status_counts": {
+    "accepted": 1362,
+    "held_no_line": 210,
+    "pending": 180
+   },
+   "track_source_counts": {
+    "observed": 1542,
+    "predicted": 210
+   },
+   "map_status_counts": {
+    "": 1752
+   },
+   "has_obs_fraction": 0.88,
+   "n_two_median": 10.0,
+   "stop_reasons": [
+    "reached end of lane (x=9.00)"
+   ],
+   "launch_tail": "launch_exit=0 wall_s=119"
+  }
+ },
+ "failure_stop_events": [
+  "1793704889.350229293 bad_frames_start rows=302",
+  "1793704893.536464884 bad_frames_end",
+  "1793704896.540539661 pause_physics",
+  "1793704900.081171806 cmd_vel_during_pause:",
+  "  x: 0.0",
+  "  z: 0.0",
+  "  x: 0.0",
+  "  z: 0.0",
+  "1793704902.516450838 unpause_physics"
+ ]
+}

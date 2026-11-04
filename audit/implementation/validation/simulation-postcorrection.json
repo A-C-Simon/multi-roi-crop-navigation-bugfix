@@ -1,0 +1,375 @@
+{
+ "label": "POST-CORRECTION: Gazebo reruns on the final source (independent-review corrections and held-yaw rotation included). straight_map and line_straight were not rerun; their pre-correction results are in simulation-precorrection.json.",
+ "environment": {
+  "ROS_DOMAIN_ID": 87,
+  "GAZEBO_MASTER_URI": "http://localhost:11387",
+  "ros": "humble",
+  "simulator": "gzserver 11 headless"
+ },
+ "scripts": "audit/implementation/simulation/ (rerun.sh, run_case.sh, stall_case.sh, make_gap_world.py, analyze.py)",
+ "raw_logs": "/tmp/mr_sim/runs/<run>/{nav_run.csv,launch.log} (not committed)",
+ "notes": [
+  "cross_track_m is odometry y minus the plant-pose centreline of the world (two-row fields)",
+  "steer_accel_radps2 is computed from 3-decimal CSV commands and image-stamp intervals; values near 1.2 rad/s^2 are within that rounding",
+  "gap windows: the camera looks ahead, so observations continued through the configured gaps (obs_fraction near 1)"
+ ],
+ "runs": {
+  "curve_map": {
+   "run": "curve_map",
+   "world": "farm_curve.world",
+   "frames": 1975,
+   "sim_seconds": 108.7,
+   "x_start": -8.0,
+   "x_end": 9.0,
+   "cross_track_m": {
+    "mean_abs": 0.0858,
+    "rms": 0.1028,
+    "max_abs": 0.227,
+    "final": -0.0008
+   },
+   "in_row_x_le_7_cross_track_m": {
+    "mean_abs": 0.0912,
+    "max_abs": 0.227
+   },
+   "row_end_x_gt_7_held_frames": 210,
+   "w_radps": {
+    "mean_abs": 0.0466,
+    "max_abs": 0.256
+   },
+   "steer_accel_radps2": {
+    "p95": 0.418,
+    "max": 1.222
+   },
+   "dt_s": {
+    "median": 0.05
+   },
+   "status_counts": {
+    "accepted": 1606,
+    "held": 3,
+    "held_no_line": 207,
+    "pending": 159
+   },
+   "track_source_counts": {
+    "observed": 1711,
+    "predicted": 264
+   },
+   "map_status_counts": {
+    "held_no_line": 16,
+    "map_accept": 1677,
+    "map_hold": 61,
+    "map_pending": 14,
+    "map_switch": 1,
+    "no_map": 192,
+    "occlusion_hold": 14
+   },
+   "has_obs_fraction": 0.866,
+   "n_two_median": 10.0,
+   "stop_reasons": [
+    "reached end of lane (x=9.00)"
+   ],
+   "launch_tail": "launch_exit=0 wall_s=116"
+  },
+  "curve_nomap": {
+   "run": "curve_nomap",
+   "world": "farm_curve.world",
+   "frames": 2061,
+   "sim_seconds": 110.05,
+   "x_start": -8.0,
+   "x_end": 8.35,
+   "cross_track_m": {
+    "mean_abs": 0.0687,
+    "rms": 0.0884,
+    "max_abs": 0.2116,
+    "final": -0.0503
+   },
+   "in_row_x_le_7_cross_track_m": {
+    "mean_abs": 0.076,
+    "max_abs": 0.2116
+   },
+   "row_end_x_gt_7_held_frames": 119,
+   "w_radps": {
+    "mean_abs": 0.0605,
+    "max_abs": 0.297
+   },
+   "steer_accel_radps2": {
+    "p95": 0.56,
+    "max": 1.2
+   },
+   "dt_s": {
+    "median": 0.05
+   },
+   "status_counts": {
+    "accepted": 1189,
+    "held_no_line": 119,
+    "pending": 741,
+    "pending_accepted": 12
+   },
+   "track_source_counts": {
+    "observed": 1942,
+    "predicted": 119
+   },
+   "map_status_counts": {
+    "": 2061
+   },
+   "has_obs_fraction": 0.942,
+   "n_two_median": 10.0,
+   "stop_reasons": [
+    "reached max_seconds=110.0"
+   ],
+   "launch_tail": "launch_exit=0 wall_s=118"
+  },
+  "failure_stop": {
+   "run": "failure_stop",
+   "world": "farm_straight.world",
+   "frames": 901,
+   "sim_seconds": 45.01,
+   "x_start": -8.0,
+   "x_end": -0.68,
+   "cross_track_m": {
+    "mean_abs": 0.0111,
+    "rms": 0.013,
+    "max_abs": 0.0295,
+    "final": -0.0063
+   },
+   "in_row_x_le_7_cross_track_m": {
+    "mean_abs": 0.0111,
+    "max_abs": 0.0295
+   },
+   "row_end_x_gt_7_held_frames": 0,
+   "w_radps": {
+    "mean_abs": 0.0286,
+    "max_abs": 0.154
+   },
+   "steer_accel_radps2": {
+    "p95": 0.54,
+    "max": 1.12
+   },
+   "dt_s": {
+    "median": 0.05
+   },
+   "status_counts": {
+    "accepted": 782,
+    "pending": 66,
+    "perception_error": 53
+   },
+   "track_source_counts": {
+    "none": 53,
+    "observed": 848
+   },
+   "map_status_counts": {
+    "": 901
+   },
+   "has_obs_fraction": 0.941,
+   "n_two_median": 10.0,
+   "stop_reasons": [
+    "reached max_seconds=45.0"
+   ],
+   "launch_tail": "launch_exit=0 wall_s=58"
+  },
+  "gaps_map": {
+   "run": "gaps_map",
+   "world": "farm_straight_gaps.world",
+   "frames": 2071,
+   "sim_seconds": 110.0,
+   "x_start": -8.0,
+   "x_end": 8.21,
+   "cross_track_m": {
+    "mean_abs": 0.0126,
+    "rms": 0.0163,
+    "max_abs": 0.0471,
+    "final": -0.0471
+   },
+   "in_row_x_le_7_cross_track_m": {
+    "mean_abs": 0.012,
+    "max_abs": 0.0357
+   },
+   "row_end_x_gt_7_held_frames": 59,
+   "w_radps": {
+    "mean_abs": 0.0092,
+    "max_abs": 0.085
+   },
+   "steer_accel_radps2": {
+    "p95": 0.16,
+    "max": 0.66
+   },
+   "dt_s": {
+    "median": 0.05
+   },
+   "status_counts": {
+    "accepted": 1609,
+    "held": 12,
+    "held_no_line": 47,
+    "pending": 403
+   },
+   "track_source_counts": {
+    "observed": 1989,
+    "predicted": 82
+   },
+   "map_status_counts": {
+    "held_no_line": 12,
+    "map_accept": 1243,
+    "map_hold": 286,
+    "map_pending": 271,
+    "map_switch": 48,
+    "no_map": 36,
+    "occlusion_hold": 175
+   },
+   "has_obs_fraction": 0.96,
+   "n_two_median": 6.0,
+   "stop_reasons": [
+    "reached max_seconds=110.0"
+   ],
+   "launch_tail": "launch_exit=0 wall_s=118",
+   "gap_windows": {
+    "left_gap[-3,-1.5]": {
+     "max_abs_ct_m": 0.0337,
+     "max_abs_w": 0.051,
+     "obs_fraction": 1.0
+    },
+    "right_gap[1,2.5]": {
+     "max_abs_ct_m": 0.0293,
+     "max_abs_w": 0.044,
+     "obs_fraction": 0.992
+    },
+    "full_gap[4.5,5.3]": {
+     "max_abs_ct_m": 0.0357,
+     "max_abs_w": 0.046,
+     "obs_fraction": 1.0
+    }
+   }
+  },
+  "gaps_nomap": {
+   "run": "gaps_nomap",
+   "world": "farm_straight_gaps.world",
+   "frames": 2068,
+   "sim_seconds": 110.0,
+   "x_start": -8.0,
+   "x_end": 8.69,
+   "cross_track_m": {
+    "mean_abs": 0.0274,
+    "rms": 0.0398,
+    "max_abs": 0.1561,
+    "final": -0.1561
+   },
+   "in_row_x_le_7_cross_track_m": {
+    "mean_abs": 0.0201,
+    "max_abs": 0.0639
+   },
+   "row_end_x_gt_7_held_frames": 187,
+   "w_radps": {
+    "mean_abs": 0.0358,
+    "max_abs": 0.167
+   },
+   "steer_accel_radps2": {
+    "p95": 0.5,
+    "max": 0.979
+   },
+   "dt_s": {
+    "median": 0.05
+   },
+   "status_counts": {
+    "accepted": 1479,
+    "held_no_line": 187,
+    "pending": 394,
+    "pending_accepted": 8
+   },
+   "track_source_counts": {
+    "observed": 1881,
+    "predicted": 187
+   },
+   "map_status_counts": {
+    "": 2068
+   },
+   "has_obs_fraction": 0.91,
+   "n_two_median": 9.0,
+   "stop_reasons": [
+    "reached max_seconds=110.0"
+   ],
+   "launch_tail": "launch_exit=0 wall_s=118",
+   "gap_windows": {
+    "left_gap[-3,-1.5]": {
+     "max_abs_ct_m": 0.0547,
+     "max_abs_w": 0.162,
+     "obs_fraction": 1.0
+    },
+    "right_gap[1,2.5]": {
+     "max_abs_ct_m": 0.0283,
+     "max_abs_w": 0.122,
+     "obs_fraction": 1.0
+    },
+    "full_gap[4.5,5.3]": {
+     "max_abs_ct_m": 0.0639,
+     "max_abs_w": 0.149,
+     "obs_fraction": 1.0
+    }
+   }
+  },
+  "straight_nomap": {
+   "run": "straight_nomap",
+   "world": "farm_straight.world",
+   "frames": 1869,
+   "sim_seconds": 108.11,
+   "x_start": -8.0,
+   "x_end": 9.0,
+   "cross_track_m": {
+    "mean_abs": 0.0212,
+    "rms": 0.0284,
+    "max_abs": 0.07,
+    "final": -0.0032
+   },
+   "in_row_x_le_7_cross_track_m": {
+    "mean_abs": 0.0172,
+    "max_abs": 0.069
+   },
+   "row_end_x_gt_7_held_frames": 262,
+   "w_radps": {
+    "mean_abs": 0.0318,
+    "max_abs": 0.203
+   },
+   "steer_accel_radps2": {
+    "p95": 0.533,
+    "max": 1.038
+   },
+   "dt_s": {
+    "median": 0.05
+   },
+   "status_counts": {
+    "accepted": 1371,
+    "held_no_line": 262,
+    "pending": 236
+   },
+   "track_source_counts": {
+    "observed": 1607,
+    "predicted": 262
+   },
+   "map_status_counts": {
+    "": 1869
+   },
+   "has_obs_fraction": 0.86,
+   "n_two_median": 10.0,
+   "stop_reasons": [
+    "reached end of lane (x=9.00)"
+   ],
+   "launch_tail": "launch_exit=0 wall_s=118"
+  }
+ },
+ "failure_stop_events": [
+  "1793797357.024627300 bad_frames_start rows=301",
+  "1793797361.200248920 bad_frames_end",
+  "1793797364.204897325 pause_physics",
+  "1793797367.578734275 cmd_vel_during_pause:",
+  "  x: 0.0",
+  "  z: 0.0",
+  "  x: 0.0",
+  "  z: 0.0",
+  "1793797370.007632138 unpause_physics"
+ ],
+ "failure_stop_log_lines": [
+  "camera watchdog on: zero command after 1.00s without frames",
+  "perception failure (1): unsupported encoding mono16; commanding stop",
+  "perception failure (41): unsupported encoding mono16; commanding stop",
+  "camera stall: no frame for 1.07s, commanding stop",
+  "camera frames resumed",
+  "stop: reached max_seconds=45.0"
+ ]
+}

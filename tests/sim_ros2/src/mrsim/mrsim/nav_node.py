@@ -34,6 +34,7 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPo
 from sensor_msgs.msg import Image
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
+from std_msgs.msg import Empty
 from cv_bridge import CvBridge
 
 
@@ -57,6 +58,10 @@ sys.path.insert(0, _MULTIROI)
 
 # nav-mode pipeline comes from the algorithm-selection seam (default: multiroi)
 from pipeline import build_pipeline, current_algorithm  # noqa: E402
+
+
+class NavRunFinished(Exception):
+    """Raised from a callback after _stop_robot() so rclpy.spin returns."""
 
 
 def _sensor_qos():
@@ -160,6 +165,22 @@ class MultiROINavNode(Node):
                     f"row change on: {len(self.furrows)} furrows, start lane "
                     f"{self.lane_index} (y={self.lane_y:+.2f}), "
                     f"max_lanes={self.max_lanes:g} turn={self.turn_mode}")
+        # initial lane bookkeeping, restored on /reset_rover
+        self._start_lane_index = self.lane_index
+        self._start_lane_y = self.lane_y
+        # camera-stall watchdog: seconds without a camera frame before a
+        # zero command is published (0 = disabled; deployment policy)
+        try:
+            self.camera_timeout = float(os.environ.get(
+                "MRSIM_CAMERA_TIMEOUT", _p("camera_timeout", 0.0)))
+        except (TypeError, ValueError):
+            self.camera_timeout = 0.0
+        self._stopped = False
+        self._last_img_mono = None
+        self._stall_active = False
+        self.n_perception_errors = 0
+        self._last_err_log = 0.0
+        self.rear_last_img_t = None
         log_dir = os.environ.get("MRSIM_LOG_DIR", _p("log_dir", ""))
         self.save_every = int(os.environ.get("MRSIM_SAVE_EVERY",
                                              _p("save_every", 20)))
@@ -178,7 +199,8 @@ class MultiROINavNode(Node):
             self.csv_w.writerow(["sim_t", "odom_x", "odom_y", "cross_track",
                                  "err_x_px", "raw_th_deg", "filt_th_deg",
                                  "conf", "status", "v", "w", "n_two", "ff",
-                                 "rear_err_x_px", "rear_th_deg", "rear_conf"])
+                                 "rear_err_x_px", "rear_th_deg", "rear_conf",
+                                 "dt", "has_obs", "track_source", "map_status"])
             self.get_logger().info(f"logging to {self.log_dir}")
 
         # --- algorithm pipeline (selection seam; default: multiroi) ---
@@ -251,8 +273,57 @@ class MultiROINavNode(Node):
         self._last_cmd.linear.x = 0.0
         self._last_cmd.angular.z = 0.0
         self._cmd_seq = 0
+        # /reset_rover (rover_reset.py respawns the model): reset the
+        # perception, lap and row-change state so the run restarts cleanly
+        self.reset_sub = self.create_subscription(
+            Empty, "/reset_rover", self._on_reset, 5)
+        if self.camera_timeout > 0.0:
+            self.create_timer(0.1, self._watchdog)
+            self.get_logger().info(
+                f"camera watchdog on: zero command after "
+                f"{self.camera_timeout:.2f}s without frames")
 
     # --------------------------------------------------------------
+    def _publish_cmd(self, twist):
+        if self.idle or self._stopped:
+            return
+        self.cmd_pub.publish(twist)
+        self._last_cmd = twist
+
+    def _watchdog(self):
+        """Publish a zero command while camera frames have stopped arriving."""
+        if self._stopped or self.idle or self._last_img_mono is None:
+            return
+        age = time.monotonic() - self._last_img_mono
+        if age > self.camera_timeout:
+            self._publish_cmd(Twist())
+            if not self._stall_active:
+                self._stall_active = True
+                self.get_logger().warn(
+                    f"camera stall: no frame for {age:.2f}s, commanding stop")
+
+    def _on_reset(self, _msg):
+        """Rover respawned at its start pose: restart run-time state."""
+        self._reset_perception()
+        self._lap_angle = 0.0
+        self._lap_prev = None
+        self.lane_index = self._start_lane_index
+        self.lane_y = self._start_lane_y
+        self.phase_target_y = self.lane_y
+        self.turn_dir = 1
+        self.lanes_done = 0
+        self.drive_dir = 1
+        self.phase = "follow"
+        self.leg_x0 = self.lane_start_x
+        self.leg_yaw = 0.0
+        self.end_empty_n = 0
+        self.last_img_t = None
+        self.rear_last_img_t = None
+        self.front_info = None
+        self.front_t = None
+        self._publish_cmd(Twist())
+        self.get_logger().info("reset_rover: navigation state reset to start lane")
+
     @staticmethod
     def _quat_to_yaw(q):
         siny = 2.0 * (q.w * q.z + q.x * q.y)
@@ -482,7 +553,8 @@ class MultiROINavNode(Node):
             if (t_now - pipe_t) > 0.5:
                 return None
             info = pipe_out.get("info", {})
-            if not info.get("has_line", False):
+            # a lock needs a fresh detector observation, not a held track
+            if not info.get("has_observation", False):
                 return None
             return info
         except Exception:
@@ -741,7 +813,8 @@ class MultiROINavNode(Node):
             if self.rear_t is None or (t_now - self.rear_t) > 0.5:
                 return None
             info = self.rear_out.get("info", {})
-            if not info.get("has_line", False):
+            # reverse steering needs a fresh rear observation
+            if not info.get("has_observation", False):
                 return None
             return info
         except Exception:
@@ -857,14 +930,79 @@ class MultiROINavNode(Node):
 
     # --------------------------------------------------------------
     def _stop_robot(self, reason: str):
+        """Publish a zero command and close the log once (idempotent).
+
+        Node destruction and rclpy shutdown happen in main(); callbacks raise
+        NavRunFinished afterwards so rclpy.spin returns and the process exits
+        (the launch file shuts down on nav exit).
+        """
+        if self._stopped:
+            return
         self.get_logger().info(f"stop: {reason}")
         zero = Twist()
-        self.cmd_pub.publish(zero)
+        try:
+            if not self.idle:
+                self.cmd_pub.publish(zero)
+                time.sleep(0.05)
+                self.cmd_pub.publish(zero)
+        except Exception:
+            pass
         self._last_cmd = zero
-        if self.log_dir:
+        self._stopped = True
+        if self.log_dir and not self.csv_f.closed:
             self.csv_f.close()
             self.get_logger().info(f"CSV closed -> {self.log_dir / 'nav_run.csv'}")
-        self.destroy_node()
+
+    def _finish(self, reason: str):
+        self._stop_robot(reason)
+        raise NavRunFinished(reason)
+
+    def _check_termination(self, t_now, stop_reason=""):
+        """Run-end conditions (time, lane end, laps, frame cap)."""
+        if self.idle:
+            return
+        if self.max_seconds > 0 and (t_now - self.t0) >= self.max_seconds:
+            self._finish(f"reached max_seconds={self.max_seconds}")
+        elif stop_reason:
+            self._finish(stop_reason)
+        elif self.circle_r > 0:
+            if self.max_laps > 0 and abs(self._lap_angle) >= self.max_laps * 2.0 * math.pi:
+                self._finish(
+                    f"completed {self.max_laps:g} lap(s) "
+                    f"(radial err {self._cross_track():+.2f} m)")
+            elif self.frame_idx > 60000:
+                self._finish("frame cap")
+        elif self.row_change:
+            if self.frame_idx > 60000:
+                self._finish("frame cap")
+            # lane ends handled by the row-change machine (legs/lanes bound it)
+        elif self.odom_x >= self.lane_end_x:
+            self._finish(f"reached end of lane (x={self.odom_x:.2f})")
+        elif self.frame_idx > 20000:
+            self._finish("frame cap")
+
+    def _on_perception_failure(self, t_now, err: str):
+        """Decode/pipeline failure: stop this tick, log, keep run-end checks.
+
+        This is a processing failure, not an ordinary frame without crops
+        (those return a held track or no track from the pipeline itself).
+        """
+        self.n_perception_errors += 1
+        now = time.monotonic()
+        if now - self._last_err_log > 2.0:
+            self._last_err_log = now
+            self.get_logger().error(
+                f"perception failure ({self.n_perception_errors}): {err}; "
+                "commanding stop")
+        self._publish_cmd(Twist())
+        if self.log_dir and not self.csv_f.closed:
+            self.csv_w.writerow([
+                f"{t_now:.3f}", f"{self.odom_x:.3f}", f"{self.odom_y:.3f}",
+                f"{self._cross_track():.3f}", "", "", "", "0.00",
+                "perception_error", "0.000", "0.000", 0, "", "", "", "",
+                "", 0, "none", ""])
+            self.csv_f.flush()
+        self._check_termination(t_now)
 
     # --------------------------------------------------------------
     def _decode_bgr(self, msg: Image):
@@ -897,9 +1035,16 @@ class MultiROINavNode(Node):
             return
         if bgr is None:
             return
+        if self.rear_last_img_t is not None:
+            rdt = t_now - self.rear_last_img_t
+            if rdt <= 0.0 or rdt > 0.5:
+                rdt = 0.05
+        else:
+            rdt = 0.05
+        self.rear_last_img_t = t_now
         try:
             t0 = time.perf_counter()
-            out = self.rear_pipeline.process(bgr)
+            out = self.rear_pipeline.process(bgr, dt=rdt)
             self.rear_ms = 1000.0 * (time.perf_counter() - t0)
         except Exception as e:
             self.get_logger().error(f"rear pipeline failed: {e}")
@@ -938,6 +1083,12 @@ class MultiROINavNode(Node):
         return ["", "", ""]
 
     def _on_image(self, msg: Image):
+        if self._stopped:
+            return
+        self._last_img_mono = time.monotonic()
+        if self._stall_active:
+            self._stall_active = False
+            self.get_logger().info("camera frames resumed")
         # sim-time delta between frames
         t_now = msg.header.stamp.sec + msg.header.stamp.nanosec * 1e-9
         if self.last_img_t is not None:
@@ -952,19 +1103,22 @@ class MultiROINavNode(Node):
             self.t0 = t_now
         self.frame_idx += 1
 
-        # decode to BGR
+        # decode to BGR; any decode or pipeline failure stops the rover for
+        # this tick and still runs the run-end checks
         try:
             bgr = self._decode_bgr(msg)
         except Exception as e:
-            self.get_logger().warn(f"decode: {e}")
+            self._on_perception_failure(t_now, f"decode: {e}")
             return
         if bgr is None:
+            self._on_perception_failure(t_now, f"unsupported encoding {msg.encoding}")
             return
 
         try:
-            out = self.pipeline.process(bgr)
+            out = self.pipeline.process(bgr, dt=dt)
         except Exception as e:
-            self.get_logger().error(f"pipeline {self.pipeline.name} failed: {e}")
+            self._on_perception_failure(
+                t_now, f"pipeline {self.pipeline.name} failed: {e}")
             return
         self.last_w = float(out["w"])
         info = out["info"]
@@ -978,9 +1132,7 @@ class MultiROINavNode(Node):
         stop_reason = ""
         if self.row_change and self.circle_r <= 0.0 and not self.idle:
             twist, stop_reason = self._step_row_change(out, t_now)
-        if not self.idle:
-            self.cmd_pub.publish(twist)
-            self._last_cmd = twist
+        self._publish_cmd(twist)
         self._cmd_seq += 1
 
         # --- overlay ---
@@ -1008,7 +1160,9 @@ class MultiROINavNode(Node):
                 f"{self._last_cmd.linear.x:.3f}",
                 f"{self._last_cmd.angular.z:.3f}",
                 int(info.get("n_two_sided", 0)), f"{info.get('ff', 0):.4f}",
-                *self._rear_csv()])
+                *self._rear_csv(),
+                f"{dt:.4f}", int(bool(info.get("has_observation", False))),
+                str(info.get("track_source", "")), str(info.get("map_status", ""))])
             self.csv_f.flush()
             if ovl is not None and self.frame_idx % self.save_every == 0:
                 cv2.imwrite(str(self.log_dir / f"frame_{self.frame_idx:05d}.png"), ovl)
@@ -1044,29 +1198,7 @@ class MultiROINavNode(Node):
                 f"status={info.get('status', '')}{rear_txt}")
 
         # auto-termination is disabled while idling (teleop decides when done)
-        if self.idle:
-            return
-
-        # termination conditions
-        if self.max_seconds > 0 and (t_now - self.t0) >= self.max_seconds:
-            self._stop_robot(f"reached max_seconds={self.max_seconds}")
-        elif stop_reason:
-            self._stop_robot(stop_reason)
-        elif self.circle_r > 0:
-            if self.max_laps > 0 and abs(self._lap_angle) >= self.max_laps * 2.0 * math.pi:
-                self._stop_robot(
-                    f"completed {self.max_laps:g} lap(s) "
-                    f"(radial err {cross:+.2f} m)")
-            elif self.frame_idx > 60000:
-                self._stop_robot("frame cap")
-        elif self.row_change:
-            if self.frame_idx > 60000:
-                self._stop_robot("frame cap")
-            # lane ends handled by the row-change machine (legs/lanes bound it)
-        elif self.odom_x >= self.lane_end_x:
-            self._stop_robot(f"reached end of lane (x={self.odom_x:.2f})")
-        elif self.frame_idx > 20000:
-            self._stop_robot("frame cap")
+        self._check_termination(t_now, stop_reason)
 
     def destroy_node(self):
         if self.log_dir and not self.csv_f.closed:
@@ -1079,10 +1211,16 @@ def main(args=None):
     node = MultiROINavNode()
     try:
         rclpy.spin(node)
+    except NavRunFinished:
+        pass
     except KeyboardInterrupt:
         node.get_logger().info("interrupted")
     finally:
-        node._stop_robot("shutdown") if hasattr(node, "_stop_robot") else None
+        node._stop_robot("shutdown")
+        try:
+            node.destroy_node()
+        except Exception:
+            pass
         if rclpy.ok():
             rclpy.shutdown()
 

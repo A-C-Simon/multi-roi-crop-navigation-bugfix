@@ -84,10 +84,19 @@ class MRVSParams:
     # These are applied INSIDE compute_control when smooth=True
     # Keep small/causal to avoid lag but prevent chatter
     w_alpha: float = 0.35         # low-pass on w (0=hold, 1=no smoothing)
+    # w_alpha is defined per w_alpha_ref_dt seconds (20 Hz nominal) and is
+    # rescaled to the actual update interval, so the low-pass time constant
+    # is the same in physical time at every source rate. <=0 applies
+    # w_alpha once per call (legacy, rate dependent).
+    w_alpha_ref_dt: float = 0.05
     max_w_rate: float = 1.2       # rad/s per second (rate limit)
     w_deadband: float = 0.02      # rad/s; values below -> 0
     v_conf_scale: bool = True
     v_min_scale: float = 0.45     # at confidence 0, v = vf * 0.45
+    # When True the runners set width/height from the first processed frame
+    # (used when no explicit --width/--height was given). False keeps the
+    # configured normalization geometry.
+    geometry_from_frame: bool = False
 
 
 def curve_bend(nav_curve=None, q_feed=None):
@@ -196,7 +205,8 @@ class MultiROIVS:
         self.last_F = np.zeros(3)
         self.last_err = np.zeros(2)
         # For command smoothing (rate-limit + low-pass)
-        self._prev_w: float = 0.0
+        self._prev_w: float = 0.0      # rate-limited state (before deadband)
+        self._prev_out: float = 0.0    # last published command
         self._prev_v: float = float(self.params.vf_des)
         self._prev_time: Optional[float] = None
         # Lateral integrator state (anti-windup handled in compute_control)
@@ -204,9 +214,67 @@ class MultiROIVS:
 
     def reset_smoother(self):
         self._prev_w = 0.0
+        self._prev_out = 0.0
         self._prev_v = float(self.params.vf_des)
         self._prev_time = None
         self._i_term = 0.0
+
+    def _resolve_dt(self, dt: Optional[float]) -> float:
+        """Update interval for smoothing and integration.
+
+        An explicit dt (source frame interval, simulation time) is used as
+        given; otherwise the host clock between calls is used. Both are
+        bounded to [1 ms, 0.5 s]. One value serves the low-pass, the rate
+        limit and the integrator so they share a single time base.
+        """
+        now = time.perf_counter()
+        if dt is None:
+            dt = 0.05 if self._prev_time is None else now - self._prev_time
+        try:
+            dt = float(dt)
+        except (TypeError, ValueError):
+            dt = 0.05
+        if not math.isfinite(dt):
+            dt = 0.05
+        self._prev_time = now
+        return max(1e-3, min(0.5, dt))
+
+    def _lpf_alpha(self, dt: float) -> float:
+        p = self.params
+        a = float(p.w_alpha)
+        ref = float(getattr(p, "w_alpha_ref_dt", 0.0) or 0.0)
+        if ref > 0.0 and 0.0 < a < 1.0:
+            a = 1.0 - (1.0 - a) ** (dt / ref)
+        return a
+
+    def _smooth_w(self, target: float, dt: float) -> float:
+        """Low-pass + rate limit + clamp on the state, deadband, then a final
+        rate limit on the PUBLISHED command.
+
+        The stored state is the rate-limited value before the deadband. If
+        the deadbanded zero were stored instead, every step smaller than the
+        deadband (max_w_rate*dt < w_deadband, i.e. updates faster than
+        ~60 Hz at the defaults) would be reset to zero forever and a steady
+        turn demand would never be issued. The deadbanded target is then
+        approached by the returned command at no more than max_w_rate*dt per
+        update, so leaving or entering the deadband never steps the published
+        command faster than the configured rate.
+        """
+        p = self.params
+        a = self._lpf_alpha(dt)
+        w_state = (1.0 - a) * self._prev_w + a * float(target)
+        max_delta = p.max_w_rate * dt
+        delta = w_state - self._prev_w
+        if abs(delta) > max_delta:
+            w_state = self._prev_w + math.copysign(max_delta, delta)
+        w_state = max(-p.w_max, min(p.w_max, w_state))
+        self._prev_w = w_state
+        target_out = 0.0 if abs(w_state) < p.w_deadband else w_state
+        step = target_out - self._prev_out
+        if abs(step) > max_delta:
+            target_out = self._prev_out + math.copysign(max_delta, step)
+        self._prev_out = target_out
+        return target_out
 
     def nav_line_to_feature(self, nav_line, nav_curve, crop_offset, image_shape, vertical_coverage=None) -> Tuple[Optional[np.ndarray], Optional[Tuple[float, float]]]:
         """
@@ -325,35 +393,21 @@ class MultiROIVS:
         Smoothing (when smooth=True):
           - low-pass: w_lpf = (1-alpha)*prev_w + alpha*w_raw
           - rate limit: |delta|/dt <= max_w_rate
-          - deadband: |w|<w_deadband -> 0
+          - deadband: |w|<w_deadband -> 0, applied to the returned command
+            only; the internal state keeps the rate-limited value
+          - one dt (explicit source interval, else host clock) drives the
+            low-pass, the rate limit and the integrator
           - confidence-based v scaling
 
         Returns (v, w, info dict)
         """
         p = self.params
+        dt = self._resolve_dt(dt)
         if F is None:
             # also smooth hold
             if smooth:
                 # decay w toward 0 with rate limit
-                now = time.perf_counter()
-                if dt is None:
-                    if self._prev_time is None:
-                        dt = 0.05
-                    else:
-                        dt = now - self._prev_time
-                        dt = max(1e-3, min(0.5, dt))
-                self._prev_time = now
-                max_delta = p.max_w_rate * dt
-                # low-pass toward 0
-                target = 0.0
-                w_lpf = (1 - p.w_alpha) * self._prev_w + p.w_alpha * target
-                # rate limit to 0
-                delta = w_lpf - self._prev_w
-                if abs(delta) > max_delta:
-                    w_lpf = self._prev_w + math.copysign(max_delta, delta)
-                if abs(w_lpf) < p.w_deadband:
-                    w_lpf = 0.0
-                self._prev_w = w_lpf
+                w_lpf = self._smooth_w(0.0, dt)
                 v = p.vf_des * (p.v_min_scale + (1 - p.v_min_scale) * float(np.clip(confidence, 0, 1))) if p.v_conf_scale else p.vf_des
                 self._prev_v = v
                 return v, w_lpf, {"err_x": 0, "err_theta": 0, "w_raw": 0.0, "w": float(w_lpf), "v": float(v), "smoothed": True}
@@ -389,12 +443,6 @@ class MultiROIVS:
         i_term = 0.0
         if ki != 0.0:
             dt_i = dt
-            if dt_i is None:
-                dt_i = 0.05
-            try:
-                dt_i = max(1e-3, min(0.5, float(dt_i)))
-            except Exception:
-                dt_i = 0.05
             try:
                 i_max = float(getattr(p, "i_max", 1.0))
                 i_min_conf = float(getattr(p, "i_min_conf", 0.4))
@@ -423,27 +471,7 @@ class MultiROIVS:
         v_out = v_raw
 
         if smooth:
-            now = time.perf_counter()
-            if dt is None:
-                if self._prev_time is None:
-                    dt = 0.05
-                else:
-                    dt = now - self._prev_time
-                    dt = max(1e-3, min(0.5, dt))
-            self._prev_time = now
-            # low-pass
-            w_lpf = (1 - p.w_alpha) * self._prev_w + p.w_alpha * w_clamped
-            # rate limit
-            max_delta = p.max_w_rate * dt
-            delta = w_lpf - self._prev_w
-            if abs(delta) > max_delta:
-                w_lpf = self._prev_w + math.copysign(max_delta, delta)
-            # re-clamp to max
-            w_lpf = max(-p.w_max, min(p.w_max, w_lpf))
-            if abs(w_lpf) < p.w_deadband:
-                w_lpf = 0.0
-            w_out = w_lpf
-            self._prev_w = w_out
+            w_out = self._smooth_w(w_clamped, dt)
             # confidence-based v scaling
             if p.v_conf_scale:
                 scale = p.v_min_scale + (1.0 - p.v_min_scale) * float(np.clip(confidence, 0.0, 1.0))
@@ -462,6 +490,7 @@ class MultiROIVS:
             "ff": float(ff_val),
             "gate": float(gate),
             "i_term": float(i_term),
+            "dt": float(dt),
         }
         self.last_F = F.copy()
         self.last_err = np.array([err_x, err_theta])

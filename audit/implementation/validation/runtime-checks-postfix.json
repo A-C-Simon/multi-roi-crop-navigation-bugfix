@@ -1,0 +1,353 @@
+{
+ "description": "audit/reproductions/runtime_checks.py run against the corrected source. 'reproduced': false means the baseline defect no longer reproduces. Baseline results remain in audit/evidence/runtime-results.json.",
+ "command": "env -u PYTHONPATH -u PYTHONHOME python3 audit/reproductions/runtime_checks.py --repo . --output /tmp/mr_postfix_runtime.json",
+ "exit_status": 1,
+ "summary": {
+  "F01": {
+   "reproduced": false
+  },
+  "F02": {
+   "reproduced": false
+  },
+  "F03": {
+   "reproduced": false,
+   "unexpected_error": "ValueError: lookahead map has n_bins=10 but the detector strip profile has 8 strips; configure both with the same strip count"
+  },
+  "F04": {
+   "reproduced": false
+  },
+  "F05": {
+   "reproduced": false
+  },
+  "F06": {
+   "reproduced": true
+  },
+  "F07": {
+   "reproduced": false
+  },
+  "F08": {
+   "reproduced": false,
+   "unexpected_error": "AttributeError: 'types.SimpleNamespace' object has no attribute '_stopped'"
+  },
+  "F09": {
+   "reproduced": false
+  },
+  "F10": {
+   "reproduced": false
+  },
+  "A01": {
+   "reproduced": false
+  },
+  "A02": {
+   "reproduced": false
+  },
+  "P06": {
+   "reproduced": true
+  },
+  "P07": {
+   "reproduced": false
+  },
+  "P08": {
+   "reproduced": false
+  },
+  "P09": {
+   "reproduced": true
+  },
+  "P10": {
+   "reproduced": false,
+   "unexpected_error": "ValueError: n_strips must be an integer >= 2, got 1"
+  }
+ },
+ "notes": {
+  "F06": "Still reproduces by construction: the case calls compute_control without dt and injects the host clock. All runners now pass a source interval; the dt=None API path keeps the host clock.",
+  "P06": "Configuration policy (CLI vs library gains), intentionally unchanged.",
+  "P09": "The case computes the map grid from LookaheadParams arithmetic, not from the map at run time. After update() the map uses the detector strip height (tests/unit/test_geometry.py::test_map_strip_grid_and_overlay_follow_detector_rows).",
+  "F03": "Now an explicit ValueError naming the strip/bin mismatch instead of an IndexError on frame 2.",
+  "P10": "Now an explicit ValueError at construction instead of UnboundLocalError.",
+  "F08": "The harness drives the old callback with a stub lacking the new _stopped attribute; the corrected behaviour is covered by tests/unit/test_runtime_adapters.py."
+ },
+ "results": {
+  "F01": {
+   "reproduced": false,
+   "observed": [
+    {
+     "lookahead": false,
+     "theta_deg": 7.8538835454147025,
+     "w_raw": -0.145454673914988
+    },
+    {
+     "lookahead": true,
+     "theta_deg": 7.955586363642355,
+     "w_raw": -0.14580567722159107
+    }
+   ]
+  },
+  "F02": {
+   "reproduced": false,
+   "observed": {
+    "without_map_px": 1.0000000000000568,
+    "with_map_px": 1.0,
+    "crop_offset": [
+     12,
+     9
+    ]
+   }
+  },
+  "F03": {
+   "reproduced": false,
+   "unexpected_error": "ValueError: lookahead map has n_bins=10 but the detector strip profile has 8 strips; configure both with the same strip count"
+  },
+  "F04": {
+   "reproduced": false,
+   "observed": {
+    "two_sided": 0,
+    "accepted_points": 0,
+    "has_line": false,
+    "v_mps": 0.0,
+    "status": "held_no_line",
+    "confidence": 0.05
+   }
+  },
+  "F05": {
+   "reproduced": false,
+   "observed": {
+    "info_has_line_present": true,
+    "filtered_has_line": true,
+    "two_sided": 10
+   },
+   "scope": "Reproduces the missing interface field; no Gazebo run performed"
+  },
+  "F06": {
+   "reproduced": true,
+   "observed": [
+    {
+     "elapsed_host_seconds": 0.001,
+     "w_radps": -0.0612
+    },
+    {
+     "elapsed_host_seconds": 0.4,
+     "w_radps": -0.3044542184745117
+    }
+   ],
+   "scope": "Deterministic clock injection into the existing wall-clock controller path"
+  },
+  "F07": {
+   "reproduced": false,
+   "observed": {
+    "filter_runs": [
+     {
+      "configured_strips": 10,
+      "two_sided": 6,
+      "filtered_bottom_x": 320.0,
+      "status": "pending",
+      "pending_count": 200
+     },
+     {
+      "configured_strips": 5,
+      "two_sided": 5,
+      "filtered_bottom_x": 420.0,
+      "status": "accepted",
+      "pending_count": 0
+     }
+    ],
+    "detector_two_sided_by_ignore_initial": {
+     "0": 10,
+     "3": 7,
+     "4": 6
+    }
+   },
+   "scope": "Filter hold and detector evidence limit reproduced; no closed-loop trajectory measured"
+  },
+  "F08": {
+   "reproduced": false,
+   "unexpected_error": "AttributeError: 'types.SimpleNamespace' object has no attribute '_stopped'"
+  },
+  "F09": {
+   "reproduced": false,
+   "observed": {
+    "interleaved_statuses": [
+     "pending",
+     "pending",
+     "pending",
+     "pending",
+     "pending",
+     "pending",
+     "pending"
+    ],
+    "after_100_missing_frames_then_one_observation": "pending_accepted",
+    "filtered_bottom_x_after_gap": 355.0
+   }
+  },
+  "F10": {
+   "reproduced": false,
+   "observed": {
+    "maximum_difference_from_all_points_spline": 47.79145598914948,
+    "input_points": 8,
+    "kept_points": 7
+   },
+   "scope": "Reports whether the proposed sample actually removed any point as well as spline agreement"
+  },
+  "A01": {
+   "reproduced": false,
+   "observed": {
+    "expected_x": 300,
+    "point_order_results": [
+     {
+      "line": [
+       -1000000.0,
+       300000000.0
+      ],
+      "x_at_y_250": 299.99975
+     },
+     {
+      "line": [
+       1000000.0,
+       -300000000.0
+      ],
+      "x_at_y_250": 300.00025
+     }
+    ],
+    "healthy_straight_corridor": {
+     "two_sided": 10,
+     "lateral_error_px": 0.999539000000027,
+     "v_mps": 0.2,
+     "w_radps": 0.0
+    }
+   }
+  },
+  "A02": {
+   "reproduced": false,
+   "observed": [
+    {
+     "dt_seconds": 0.05,
+     "command_after_100_updates": -0.3125,
+     "raw_command": -0.3125
+    },
+    {
+     "dt_seconds": 0.01,
+     "command_after_100_updates": -0.31241250613910115,
+     "raw_command": -0.3125
+    },
+    {
+     "dt_seconds": 0.005,
+     "command_after_100_updates": -0.3059966877673216,
+     "raw_command": -0.3125
+    }
+   ]
+  },
+  "P06": {
+   "reproduced": true,
+   "observed": {
+    "cli_lambdax": 10.0,
+    "library_lambdax": 2.0,
+    "cli_wmax": 0.5,
+    "library_wmax": 0.6
+   },
+   "scope": "Configuration divergence; stability consequences not measured"
+  },
+  "P07": {
+   "reproduced": false,
+   "observed": {
+    "true_center": 200.0,
+    "frames": [
+     {
+      "status": "map_accept",
+      "predicted_center": 200.0,
+      "confidence": 0.38799999999999996
+     },
+     {
+      "status": "map_accept",
+      "predicted_center": 200.0,
+      "confidence": 0.632634
+     },
+     {
+      "status": "map_accept",
+      "predicted_center": 200.0,
+      "confidence": 0.7868757370000001
+     },
+     {
+      "status": "map_accept",
+      "predicted_center": 200.0,
+      "confidence": 0.8841251521785002
+     },
+     {
+      "status": "map_accept",
+      "predicted_center": 200.0,
+      "confidence": 0.9454409084485444
+     },
+     {
+      "status": "map_accept",
+      "predicted_center": 200.0,
+      "confidence": 0.97
+     },
+     {
+      "status": "map_accept",
+      "predicted_center": 200.0,
+      "confidence": 0.97
+     },
+     {
+      "status": "map_accept",
+      "predicted_center": 200.0,
+      "confidence": 0.97
+     },
+     {
+      "status": "map_accept",
+      "predicted_center": 200.0,
+      "confidence": 0.97
+     },
+     {
+      "status": "map_accept",
+      "predicted_center": 200.0,
+      "confidence": 0.97
+     }
+    ]
+   }
+  },
+  "P08": {
+   "reproduced": false,
+   "observed": {
+    "missing_bottom": {
+     "map_status": "map_accept",
+     "bottom_missing": false,
+     "bottom_consistent": true,
+     "proxy_strip_status": "map_accept"
+    },
+    "ignored_bottom_support": {
+     "effective_bottom_index": 3,
+     "effective_bottom_center": 260.0,
+     "ignored_strip_0_center": 200.0,
+     "support_new": 6,
+     "upper_strips_matching_effective_bottom": 7,
+     "map_status": "map_pending"
+    }
+   }
+  },
+  "P09": {
+   "reproduced": true,
+   "observed": {
+    "detector_step_px": 34.0,
+    "map_step_px": 36.0,
+    "crop_offset": [
+     12,
+     9
+    ],
+    "detector_coverage": 0.75
+   },
+   "scope": "Grid mismatch measured; prediction and overlay impact depends on scene"
+  },
+  "P10": {
+   "reproduced": false,
+   "unexpected_error": "ValueError: n_strips must be an integer >= 2, got 1"
+  }
+ },
+ "counts": {
+  "cases": 17,
+  "no_longer_reproduced": 14,
+  "still_flagged": [
+   "F06",
+   "P06",
+   "P09"
+  ]
+ },
+ "source_state": "latest corrected source including independent-review corrections"
+}

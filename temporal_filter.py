@@ -120,8 +120,17 @@ class TemporalFilterParams:
     # tangent flicker) can persist for dozens of coherent frames while the
     # detector sees only a few two-sided strips - without this floor such a
     # bogus sustained input would be committed and drag the drawn line off
-    # course for ~1 s.  (n_strips=10 -> max two-sided is 9; 7 = near-full.)
-    commit_min_two_sided: int = 7
+    # course for ~1 s.  (n_strips=10 -> max two-sided is 10; 7 = near-full.)
+    #
+    # The floor is expressed relative to the strips that can carry evidence
+    # (n_strips - ignore_initial): ceil(commit_min_two_sided_frac * usable),
+    # i.e. 7 of 10 at the defaults. A fixed 7 was unreachable whenever fewer
+    # than 7 strips could be two-sided (e.g. ignore_initial=4, n_strips<=6),
+    # so a genuine change could never be committed in those configurations.
+    # An explicit integer overrides the fraction and is validated against the
+    # usable strip count.
+    commit_min_two_sided: Optional[int] = None
+    commit_min_two_sided_frac: float = 0.7
 
     # --- EMA smoothing when accepted ---
     alpha_x: float = 0.35       # how fast bottom_x follows accepted raw
@@ -138,9 +147,18 @@ class TemporalFilterParams:
     # k is very small.  Disabled when k==0.
     motion_gain_x: float = 0.0
     motion_gain_theta: float = 0.0
+    # Held-track heading on frames WITHOUT a fresh observation: the held
+    # image heading is rotated by the rover's own commanded yaw
+    # (theta += held_yaw_gain * last_w * dt, mr_vs sign convention). A held
+    # image-space heading otherwise keeps commanding the same turn while the
+    # rover rotates (observed in Gazebo at row ends: constant 0.2 rad/s for
+    # 11 s, 0.7 m drift). Observed frames and all gates are unaffected.
+    # Lateral position is held unchanged (no translation model). 0 disables.
+    held_yaw_gain: float = 1.0
 
-    # for logging
+    # for logging and the evidence floor
     n_strips: int = 10
+    ignore_initial: int = 0
 
 @dataclass
 class CommandSmootherParams:
@@ -161,6 +179,11 @@ class TemporalState:
     frame_idx: int = 0
     status: str = "init"           # accepted | held | pending | pending_accepted | held_no_line | init
     pending_count: int = 0
+    # True once the state was initialised from a real observation. A state
+    # created without any observation (placeholder at the image centre) is
+    # replaced by the first observation instead of gating it as an
+    # innovation against a corridor nobody saw.
+    observed: bool = False
     time_last: float = field(default_factory=time.perf_counter)
 
 class TemporalNavigationFilter:
@@ -173,6 +196,17 @@ class TemporalNavigationFilter:
 
     def __init__(self, params: Optional[TemporalFilterParams] = None):
         self.params = params or TemporalFilterParams()
+        usable = int(self.params.n_strips) - int(self.params.ignore_initial)
+        if usable < 2:
+            raise ValueError(
+                f"n_strips={self.params.n_strips} with ignore_initial="
+                f"{self.params.ignore_initial} leaves fewer than 2 evidence strips")
+        if self.params.commit_min_two_sided is not None and \
+                int(self.params.commit_min_two_sided) > usable:
+            raise ValueError(
+                f"commit_min_two_sided={self.params.commit_min_two_sided} is "
+                f"unreachable with {usable} usable strips; large changes could "
+                "never be committed")
         self.state: Optional[TemporalState] = None
         # pending candidate – the suspicious large jump we are watching
         self._pending_raw: Optional[Dict] = None
@@ -185,6 +219,22 @@ class TemporalNavigationFilter:
         self._pending_raw = None
         self._pending_count = 0
         self._frame = 0
+
+    # --------------------------------------------------------------
+    def commit_floor(self, raw: Optional[Dict] = None) -> int:
+        """Two-sided strips required to commit a large deviation."""
+        p = self.params
+        if p.commit_min_two_sided is not None:
+            return int(p.commit_min_two_sided)
+        usable = None
+        if raw is not None:
+            try:
+                usable = int(raw.get("n_evidence_strips") or 0) or None
+            except (TypeError, ValueError):
+                usable = None
+        if usable is None:
+            usable = int(p.n_strips) - int(p.ignore_initial)
+        return max(2, int(math.ceil(p.commit_min_two_sided_frac * usable - 1e-9)))
 
     # --------------------------------------------------------------
     def _compute_raw_confidence(self, raw: Dict) -> float:
@@ -258,6 +308,10 @@ class TemporalNavigationFilter:
             self._last_w = float(last_w)
 
         has_line = bool(raw.get("has_line", False))
+        # has_observation: this frame carries a fresh detector observation.
+        # has_line without it is a remembered prediction (lookahead map hold),
+        # which may be followed but is never evidence for a pending change.
+        observed = has_line and bool(raw.get("has_observation", has_line))
         raw_bottom_x = float(raw.get("raw_bottom_x", p.image_width / 2.0))
         raw_theta = float(raw.get("raw_theta", 0.0))
         raw_width = float(raw.get("raw_width", 0.0))
@@ -267,8 +321,9 @@ class TemporalNavigationFilter:
 
         raw_conf = self._compute_raw_confidence(raw)
 
-        # first frame or no line previously – initialise
-        if self.state is None:
+        # first frame, or a placeholder state that never saw an observation –
+        # initialise from the first observation
+        if self.state is None or (not self.state.observed and observed):
             if not has_line:
                 # no measurement at all – stay uninitialised but report held
                 filt_x = p.image_width / 2.0
@@ -279,7 +334,7 @@ class TemporalNavigationFilter:
                     filt_bottom_x=filt_x, filt_theta=filt_theta,
                     filt_width=filt_w, filt_X=0.0,
                     confidence=conf, frame_idx=self._frame,
-                    status="held_no_line", time_last=now)
+                    status="held_no_line", time_last=now, observed=False)
                 innov_x = innov_theta = innov_w = 0.0
                 is_large = False
                 status = "held_no_line"
@@ -293,7 +348,8 @@ class TemporalNavigationFilter:
                     confidence=float(np.clip(0.6 * raw_conf + 0.4 * 0.7, 0.0, 1.0)),
                     frame_idx=self._frame,
                     status="accepted",
-                    time_last=now)
+                    time_last=now,
+                    observed=observed)
                 innov_x = innov_theta = innov_w = 0.0
                 is_large = False
                 status = "accepted"
@@ -304,6 +360,8 @@ class TemporalNavigationFilter:
 
         # has a previous state – predict
         pred_x, pred_theta, pred_w = self._predict(dt, self._last_w)
+        if not observed and p.held_yaw_gain and self._last_w and dt:
+            pred_theta = wrapToPi(pred_theta + p.held_yaw_gain * self._last_w * dt)
 
         if not has_line:
             # no detection this frame – decay confidence, hold prediction
@@ -357,7 +415,18 @@ class TemporalNavigationFilter:
         # anomalies take the gentle low-evidence path instead.
         heading_large = is_large_x or is_large_theta
 
-        if heading_large:
+        if heading_large and not observed:
+            # Remembered prediction (no fresh observation) that disagrees with
+            # the held state: hold strictly. It neither starts nor advances a
+            # pending candidate, so memory cannot commit itself.
+            self.state.filt_bottom_x = pred_x
+            self.state.filt_theta = pred_theta
+            self.state.filt_width = pred_w
+            self.state.filt_X = self.state.filt_bottom_x - p.image_width / 2.0
+            self.state.confidence = float(np.clip(self.state.confidence * 0.92, 0.05, 1.0))
+            self.state.status = "held"
+            status = "held"
+        elif heading_large:
             # --- large deviation: spike-guard pending path ---
             # Strictly hold the pre-excursion state (no drift) while the
             # deviation is unresolved; commit it as a real change only after
@@ -397,7 +466,7 @@ class TemporalNavigationFilter:
             # two-sided (a held/stale geometry through an occlusion) - then
             # keep holding so the drawn line is not dragged toward it.
             n_two = int(raw.get("n_two_sided", p.n_strips))
-            enough_evidence = n_two >= p.commit_min_two_sided
+            enough_evidence = n_two >= self.commit_floor(raw)
             if self._pending_count >= p.persist_frames + p.spike_confirm_frames and enough_evidence:
                 # persistent coherent large deviation that has SURVIVED the spike
                 # guard window with full corridor evidence -> accept gradually.
@@ -448,6 +517,13 @@ class TemporalNavigationFilter:
             self.state.confidence = float(np.clip((1 - p.alpha_conf) * self.state.confidence + p.alpha_conf * new_conf * 0.7, 0.05, 1.0))
             self.state.status = "pending"
             status = "pending"
+            if observed:
+                # A fresh observation close to the held state contradicts the
+                # pending large-deviation candidate: the candidate's frames are
+                # no longer consecutive, so it starts over if it reappears.
+                # (Frames without an observation keep the candidate.)
+                self._pending_raw = None
+                self._pending_count = 0
         else:
             # normal small innovation – accept with EMA
             self.state.filt_bottom_x = (1 - p.alpha_x) * pred_x + p.alpha_x * raw_bottom_x
@@ -462,8 +538,11 @@ class TemporalNavigationFilter:
                 self.state.confidence = float(np.clip(self.state.confidence + 0.02, 0.0, 1.0))
             self.state.status = "accepted"
             status = "accepted"
-            self._pending_raw = None
-            self._pending_count = 0
+            if observed:
+                # only a fresh observation refutes a pending candidate; a
+                # remembered prediction is followed but is not evidence
+                self._pending_raw = None
+                self._pending_count = 0
 
         self.state.frame_idx = self._frame
         self.state.time_last = now
@@ -511,6 +590,12 @@ class TemporalNavigationFilter:
             "frame_idx": int(self._frame),
             "raw": raw,
             "has_line": bool(raw.get("has_line", False)),
+            # provenance: fresh observation this frame, and whether the
+            # filtered state descends from at least one real observation
+            "has_observation": bool(raw.get("has_line", False)
+                                    and raw.get("has_observation", raw.get("has_line", False))),
+            "track_established": bool(s.observed),
+            "commit_floor": int(self.commit_floor(raw)),
         }
 
     def get_state(self) -> Optional[TemporalState]:
@@ -523,12 +608,14 @@ class CommandSmoother:
     """
     def __init__(self, params: Optional[CommandSmootherParams] = None):
         self.params = params or CommandSmootherParams()
-        self.prev_w: float = 0.0
+        self.prev_w: float = 0.0      # rate-limited state (before deadband)
+        self.prev_out: float = 0.0    # last returned command
         self.prev_v: float = 0.0
         self.prev_time: Optional[float] = None
 
     def reset(self):
         self.prev_w = 0.0
+        self.prev_out = 0.0
         self.prev_v = 0.0
         self.prev_time = None
 
@@ -552,9 +639,16 @@ class CommandSmoother:
         if abs(delta) > max_delta:
             w_lpf = self.prev_w + math.copysign(max_delta, delta)
 
-        # deadband
-        if abs(w_lpf) < p.w_deadband:
-            w_lpf = 0.0
+        # internal state keeps the rate-limited value; the deadband applies
+        # to the returned command only (storing the deadbanded zero would
+        # reset every sub-deadband rate-limited step and lock w at zero)
+        # A final rate limit on the returned command keeps entering/leaving
+        # the deadband within max_w_rate*dt per update as well.
+        w_state = w_lpf
+        w_out = 0.0 if abs(w_state) < p.w_deadband else w_state
+        step = w_out - self.prev_out
+        if abs(step) > max_delta:
+            w_out = self.prev_out + math.copysign(max_delta, step)
 
         # confidence-based v scaling
         v_out = v_raw
@@ -565,13 +659,14 @@ class CommandSmoother:
 
         info = {
             "w_raw": float(w_raw),
-            "w_lpf": float(w_lpf),
+            "w_lpf": float(w_out),
             "delta": float(delta),
             "dt": float(dt),
             "confidence": float(confidence),
             "v_raw": float(v_raw),
             "v_out": float(v_out),
         }
-        self.prev_w = w_lpf
+        self.prev_w = w_state
+        self.prev_out = w_out
         self.prev_v = v_out
-        return w_lpf, v_out, info
+        return w_out, v_out, info

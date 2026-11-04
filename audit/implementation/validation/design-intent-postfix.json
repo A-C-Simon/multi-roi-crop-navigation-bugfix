@@ -1,0 +1,182 @@
+{
+ "description": "audit/reproductions/design_intent_checks.py run against the corrected source (exit 0). Baseline results remain in audit/evidence/design-intent-results.json. 'has_line' in the occlusion case is the harness's raw-detector field; the pipeline reports has_track true and holds the established position.",
+ "command": "env -u PYTHONPATH -u PYTHONHOME python3 audit/reproductions/design_intent_checks.py --repo . --output /tmp/mr_postfix_design.json",
+ "source_state": "latest corrected source including independent-review corrections",
+ "results": {
+  "short_false_excursion": {
+   "expected": "Hold corridor through three false measurements; recover when correct view returns",
+   "max_center_deviation_px": 0.0,
+   "max_heading_deviation_deg": 0.0,
+   "statuses": [
+    "pending",
+    "pending",
+    "pending",
+    "accepted",
+    "accepted",
+    "accepted",
+    "accepted",
+    "accepted",
+    "accepted",
+    "accepted",
+    "accepted",
+    "accepted",
+    "accepted"
+   ]
+  },
+  "persistent_low_support_false_track": {
+   "expected": "Persistent but poorly supported false track must not replace trusted corridor",
+   "center_px": 320.0,
+   "heading_deg": 0.0,
+   "status": "pending",
+   "pending_frames": 100,
+   "interpretation": "This same hold was previously used to demonstrate lockout. It is correct when the input is false; the input sequence alone does not establish which corridor is true."
+  },
+  "gradual_supported_change": {
+   "expected": "Track small per-frame lateral and heading changes",
+   "measured_center_px": 370.0,
+   "filtered_center_px": 369.07142857142856,
+   "measured_heading_deg": 10.0,
+   "filtered_heading_deg": 9.814285714285715,
+   "status": "accepted"
+  },
+  "false_local_shift_with_consistent_lookahead": {
+   "expected": "Lookahead preserves established corridor when bottom shifts but future supports old corridor",
+   "observed": [
+    {
+     "map_status": "map_hold",
+     "raw_bottom_x": 300.0,
+     "corrected_bottom_x": 200.0,
+     "spatial_support_old": 7,
+     "spatial_support_new": 0
+    },
+    {
+     "map_status": "map_hold",
+     "raw_bottom_x": 300.0,
+     "corrected_bottom_x": 200.0,
+     "spatial_support_old": 7,
+     "spatial_support_new": 0
+    },
+    {
+     "map_status": "map_hold",
+     "raw_bottom_x": 300.0,
+     "corrected_bottom_x": 200.0,
+     "spatial_support_old": 7,
+     "spatial_support_new": 0
+    },
+    {
+     "map_status": "map_hold",
+     "raw_bottom_x": 300.0,
+     "corrected_bottom_x": 200.0,
+     "spatial_support_old": 7,
+     "spatial_support_new": 0
+    },
+    {
+     "map_status": "map_hold",
+     "raw_bottom_x": 300.0,
+     "corrected_bottom_x": 200.0,
+     "spatial_support_old": 7,
+     "spatial_support_new": 0
+    },
+    {
+     "map_status": "map_hold",
+     "raw_bottom_x": 300.0,
+     "corrected_bottom_x": 200.0,
+     "spatial_support_old": 7,
+     "spatial_support_new": 0
+    },
+    {
+     "map_status": "map_hold",
+     "raw_bottom_x": 300.0,
+     "corrected_bottom_x": 200.0,
+     "spatial_support_old": 7,
+     "spatial_support_new": 0
+    },
+    {
+     "map_status": "map_hold",
+     "raw_bottom_x": 300.0,
+     "corrected_bottom_x": 200.0,
+     "spatial_support_old": 7,
+     "spatial_support_new": 0
+    },
+    {
+     "map_status": "map_hold",
+     "raw_bottom_x": 300.0,
+     "corrected_bottom_x": 200.0,
+     "spatial_support_old": 7,
+     "spatial_support_new": 0
+    },
+    {
+     "map_status": "map_hold",
+     "raw_bottom_x": 300.0,
+     "corrected_bottom_x": 200.0,
+     "spatial_support_old": 7,
+     "spatial_support_new": 0
+    },
+    {
+     "map_status": "map_hold",
+     "raw_bottom_x": 300.0,
+     "corrected_bottom_x": 200.0,
+     "spatial_support_old": 7,
+     "spatial_support_new": 0
+    },
+    {
+     "map_status": "map_hold",
+     "raw_bottom_x": 300.0,
+     "corrected_bottom_x": 200.0,
+     "spatial_support_old": 7,
+     "spatial_support_new": 0
+    }
+   ]
+  },
+  "sustained_steering_by_update_interval": {
+   "expected": "A sustained substantial command should eventually pass through smoothing at every supported update rate",
+   "observed": [
+    {
+     "dt_seconds": 0.05,
+     "raw_w_radps": -0.3125,
+     "output_w_radps": -0.3125,
+     "v_mps": 0.2
+    },
+    {
+     "dt_seconds": 0.02,
+     "raw_w_radps": -0.3125,
+     "output_w_radps": -0.312499984142135,
+     "v_mps": 0.2
+    },
+    {
+     "dt_seconds": 0.01,
+     "raw_w_radps": -0.3125,
+     "output_w_radps": -0.31241250613910115,
+     "v_mps": 0.2
+    }
+   ]
+  },
+  "temporary_full_occlusion_after_established_offcentre_track": {
+   "expected": "Retain or predict from the established corridor rather than follow an unobserved image-centre fallback",
+   "observed": [
+    {
+     "lookahead": false,
+     "before_occlusion_bottom_x": 281.0,
+     "after_20_blank_frames_bottom_x": 281.0,
+     "two_sided": 0,
+     "accepted_points": 0,
+     "has_line": false,
+     "v_mps": 0.11075626620790764,
+     "status": "held_no_line",
+     "scope": "Local pipeline, repeated stationary image followed by blank images; no closed-loop motion."
+    },
+    {
+     "lookahead": true,
+     "before_occlusion_bottom_x": 281.0,
+     "after_20_blank_frames_bottom_x": 281.00000000000006,
+     "two_sided": 0,
+     "accepted_points": 0,
+     "has_line": false,
+     "v_mps": 0.09550000000000002,
+     "status": "held_no_line",
+     "scope": "Local pipeline, repeated stationary image followed by blank images; no closed-loop motion."
+    }
+   ]
+  }
+ }
+}

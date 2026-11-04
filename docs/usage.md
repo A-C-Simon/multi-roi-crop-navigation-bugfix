@@ -64,11 +64,15 @@ ROS commands or drive hardware.
 | `--no-lookahead` | Disable lookahead memory for a comparison |
 | `--vertical-coverage 0.75` | Restrict strip coverage to the bottom 75% |
 | `--ignore-initial N` | Exclude N bottom strips from navigation evidence |
-| `--width W --height H` | Set expected image geometry for navigation normalization |
+| `--width W --height H` | Fix the controller normalization geometry (default: the actual frame size) |
 | `--vf V` | Reference forward speed in metres per second |
 | `--wmax W` | Angular command limit in radians per second |
 
-Supply `--width` and `--height` when your navigation input is not 640 by 480.
+Without `--width`/`--height`, controller normalization follows the processed
+frame size. Explicit values are kept and a mismatch with the frame is reported.
+`--lookahead-bins` must equal `--n_strips` (it defaults to it). Video files use
+their frame timestamps as the control interval; the CSV records it as `dt_s`
+together with `has_observation` and `has_track`.
 The full list and actual command defaults are available with `--help`.
 Some library defaults differ from the command-line defaults; see
 [the Python interface](python-api.md).

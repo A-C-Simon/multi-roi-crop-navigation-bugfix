@@ -239,6 +239,8 @@ def _setup(context):
             "MRSIM_VERTICAL_COVERAGE": vertical_coverage,
             "MRSIM_LINE_FIT": cfg.get("line_fit", "false"),
             "MRSIM_INIT_WINDOW": cfg.get("init_window", "1.0"),
+            "MRSIM_LOOKAHEAD": cfg.get("lookahead", "false"),
+            "MRSIM_CAMERA_TIMEOUT": cfg.get("camera_timeout", "0"),
             "MRSIM_ROW_CHANGE": cfg.get("row_change", "false"),
             "MRSIM_MAX_LANES": cfg.get("max_lanes", "2"),
             "MRSIM_TURN_MODE": cfg.get("turn_mode", "bulb"),
@@ -441,6 +443,16 @@ def generate_launch_description():
                                           "of image width (narrower anchors "
                                           "the driven furrow when several "
                                           "identical corridors are visible)"),
+        DeclareLaunchArgument("lookahead", default_value="false",
+                              description="lookahead corridor memory (search-"
+                                          "window seeding + remembered corridor); "
+                                          "false keeps the historical adapter "
+                                          "configuration, true runs the complete "
+                                          "design"),
+        DeclareLaunchArgument("camera_timeout", default_value="0",
+                              description="seconds without camera frames before "
+                                          "the nav node commands a stop (0 = "
+                                          "disabled; deployment policy)"),
         DeclareLaunchArgument("vertical_coverage", default_value="",
                               description="ROI height fraction from the image "
                                           "bottom (empty = field default)"),

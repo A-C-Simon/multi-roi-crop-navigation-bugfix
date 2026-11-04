@@ -26,10 +26,12 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install '.[dev,docs]'
           python -m pip check
-      - name: Check source snapshot
+      - name: Check source snapshot and approved bug-fix manifest
         run: python scripts/verify_snapshot.py
-      - name: Run existing regression checks
+      - name: Run inherited and bug-fix regression tests
         run: python -m pytest -q
+      - name: Compile simulator adapter sources
+        run: python -m compileall -q tests/sim_ros2/src/mrsim
       - name: Exercise installed commands
         run: |
           multiroi-detect --help

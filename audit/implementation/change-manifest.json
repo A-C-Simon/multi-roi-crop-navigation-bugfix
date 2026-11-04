@@ -1,0 +1,75 @@
+{
+  "description": "Approved bug-fix variant of the snapshot import. See audit/implementation/REPORT.md for root causes.",
+  "baseline_commit": "d5c68594e8e633b4569a4a59f8c60f33ac785cf0",
+  "snapshot_record": "docs/source-snapshot.json",
+  "recorded_at_head": "cedff9a0eb1900d0f6b9fbf5930920ead240b054",
+  "changed": {
+    "lookahead_corridor_map.py": {
+      "baseline_sha256": "586cc944411894fcb1b243dcd9299297ab8efd43f9862092ca68ccf6901bef41",
+      "current_sha256": "5acb2bafc2607849c0271d4e4c1adaa612980898f057a8d199395c3ab1fe7bc5"
+    },
+    "mr_navigation_stack.py": {
+      "baseline_sha256": "0bcf440a5fde8d502ac10e387a49fdfcca11353eb6289451c7205a491dd4ee55",
+      "current_sha256": "db7b12b3a8a8c463c9b62d62a103f937083afec41e1fc2e69432e5f9b29d5c91"
+    },
+    "mr_vs.py": {
+      "baseline_sha256": "2a6af43f7c34ff3fad98d5503c540dc8ae3dbc44f375b168461548e6abebe74c",
+      "current_sha256": "6e846b6491e03ca97a9246d2630e34b96350a67395671e6585a8734d516eedfe"
+    },
+    "run_mr_navigation.py": {
+      "baseline_sha256": "0e6a93f340720f208266bb14e2344bfca67ab6b4e1890147d36d4644504a5442",
+      "current_sha256": "f11f7be747304749b5803688f87170106e84ab5a05fca0452023d1d3a00fc712"
+    },
+    "temporal_filter.py": {
+      "baseline_sha256": "205b6f82a891d08face57c1368a20d891ce34e370da64ad198400a61cd72b29c",
+      "current_sha256": "935ce5ad09ef75dfdc6cfce7ec2afc72975eef59003f80137cd77ec4afed80d6"
+    },
+    "test_multi_roi.py": {
+      "baseline_sha256": "2a4499de84ab65dc356a9e85b51a00fac85db8577d50791b4b8a1572a0d9f25d",
+      "current_sha256": "5cad00c968d3ebbea323804f5645e79758601758c911a0111be9d1637215d774"
+    },
+    "tests/sim_ros2/run_sim.sh": {
+      "baseline_sha256": "01344bcb5ffcc24a0b8ac11bc642eeaed1d7e30c0b850b6fe0ab92396d8e1f77",
+      "current_sha256": "6f697aed50eca1e8f0f19a0b011a4fd3ff56afafad189d63527ef100dda02865"
+    },
+    "tests/sim_ros2/src/mrsim/launch/farm.launch.py": {
+      "baseline_sha256": "9f169316b06db83c61455b89c0a7a0c74a66f568e9242ba09e938fa96bdaac87",
+      "current_sha256": "86c15c2dfbea4740294231abb41a8f02240352bd041c9c2ce016a7ae3edae3bc"
+    },
+    "tests/sim_ros2/src/mrsim/mrsim/nav_node.py": {
+      "baseline_sha256": "f87bd584dfdc5a0b22ec1f71ee066b1e4a30af897268040c50824f6c6b846eb0",
+      "current_sha256": "36ff816ae7e47eba9b0420393bc21531022825874282b55136403762354e8db5"
+    },
+    "tests/sim_ros2/src/mrsim/mrsim/pipeline.py": {
+      "baseline_sha256": "194ca54034308df810404c8a96277e6583a173d138a448967869ffb8cc7898a2",
+      "current_sha256": "d66238f341344ed9c1b7633f50c0a9d45b284181acb91b43a04db440e38285cd"
+    }
+  },
+  "added": {
+    "tests/unit/conftest.py": "ff5bcda342d2d12de67f88255f207ff03701d9e12e464255886874a9285c58fe",
+    "tests/unit/synth.py": "dacbecfcd04e663d0ed08a7f142ea62a7eabb32399719bf47ca7adc1248c7469",
+    "tests/unit/test_geometry.py": "123d8656f6b68656cf326d1c1f1b3d082f48075cf14e5549d8123afcb06d65e7",
+    "tests/unit/test_smoothing.py": "4371b622a75649dc9806ecd24e2344812239b3ce9a30e8d6e4b01c92e0a20a3e",
+    "tests/unit/test_provenance.py": "c41202b96cff30fe3994787c408b9eb463910edbbeb9fad127d6a8820dc01cc5",
+    "tests/unit/test_recovery.py": "ebc545b3be8bdd527a61c2b15db21eda888d1c713c775755e3122d8008d2a824",
+    "tests/unit/test_map.py": "5d1b2f6d586e0ac11ff7408d001d536239098af8a07db8459a537e835f26ce88",
+    "tests/unit/test_runtime_adapters.py": "3ce69c0c74e7d3ef76b8d9b7c1268c6700c99afb536a699ac6dfd97ea1f7fc26",
+    "tests/unit/test_independent_review.py": "ff9c18c285dcc833a90dc2e66eede5fe19480862a8fe49482da427c4b584faf5",
+    "scripts/record_change_manifest.py": "42818b002dedcb73ec5c38a2962a08256033723b83aa19ba2509b71be5ba9d38"
+  },
+  "audited_baseline_files_changed": [
+    ".github/workflows/checks.yml",
+    "lookahead_corridor_map.py",
+    "mr_navigation_stack.py",
+    "mr_vs.py",
+    "pyproject.toml",
+    "run_mr_navigation.py",
+    "scripts/verify_snapshot.py",
+    "temporal_filter.py",
+    "test_multi_roi.py",
+    "tests/sim_ros2/run_sim.sh",
+    "tests/sim_ros2/src/mrsim/launch/farm.launch.py",
+    "tests/sim_ros2/src/mrsim/mrsim/nav_node.py",
+    "tests/sim_ros2/src/mrsim/mrsim/pipeline.py"
+  ]
+}
